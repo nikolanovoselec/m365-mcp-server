@@ -1,12 +1,12 @@
-# Microsoft 365 MCP Server for Claude Desktop
+# Microsoft 365 Remote MCP Connector
 
-Connect Claude Desktop to your Microsoft 365 MCP Server running on Cloudflare Workers.
+Connect MCP clients to your Microsoft 365 MCP Server running on Cloudflare Workers.
 
 ## Quick Setup (Web Connector - Recommended)
 
-### Option 1: Use Claude Desktop Web Connectors
+### Option 1: Use MCP Client Web Connectors
 
-1. **Open Claude Desktop**
+1. **Open your MCP client**
 2. **Go to Settings → Connectors**
 3. **Click "Add Connector"**
 4. **Enter connector details:**
@@ -15,7 +15,7 @@ Connect Claude Desktop to your Microsoft 365 MCP Server running on Cloudflare Wo
 5. **Click "Connect"** 
 6. **Complete OAuth authentication** when prompted
 
-That's it! Your Microsoft 365 tools will be available in Claude.
+That's it! Your Microsoft 365 tools will be available in your MCP client.
 
 ## Alternative Setup (JSON Configuration)
 
@@ -26,7 +26,7 @@ If web connectors are not available, you can use the traditional JSON configurat
 #### Step 1: Install
 ```bash
 git clone /path/to/this/repository
-cd m365-mcp-desktop
+cd m365-mcp-remote-connector
 npm install
 npm run build
 ```
@@ -44,13 +44,13 @@ curl -X POST https://your-worker-domain.com/register \
 
 3. Get your OAuth access token
 
-#### Step 3: Configure Claude Desktop
+#### Step 3: Configure MCP Client
 
 **For direct connection (recommended):**
 
-1. **Locate your Claude Desktop config file:**
-   - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`  
-   - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+1. **Locate your MCP client config file:**
+   - **Example paths may vary by client**
+   - **Consult your MCP client documentation for config file location**
 
 2. **Add this configuration:**
 ```json
@@ -70,7 +70,7 @@ curl -X POST https://your-worker-domain.com/register \
   "mcpServers": {
     "microsoft-365": {
       "command": "node",
-      "args": ["/path/to/m365-mcp-desktop/dist/index.js"],
+      "args": ["/path/to/m365-mcp-remote-connector/dist/index.js"],
       "env": {
         "M365_ACCESS_TOKEN": "your_oauth_access_token_here",
         "M365_SERVER_URL": "https://your-worker-domain.com"
@@ -80,7 +80,7 @@ curl -X POST https://your-worker-domain.com/register \
 }
 ```
 
-3. **Restart Claude Desktop** for changes to take effect
+3. **Restart your MCP client** for changes to take effect
 
 ## Available Tools
 
@@ -110,7 +110,7 @@ Once connected, you'll have access to:
 
 ## Example Usage
 
-After setup, you can ask Claude:
+After setup, you can ask your AI assistant:
 
 - *"Send an email to john@company.com about the meeting tomorrow"*
 - *"What's on my calendar this week?"*  
@@ -121,19 +121,19 @@ After setup, you can ask Claude:
 ## Troubleshooting
 
 ### Web Connector Issues
-- Make sure you're on Claude Pro/Team/Enterprise plan
-- Try refreshing Claude Desktop after adding the connector
+- Make sure your MCP client supports web connectors
+- Try refreshing your MCP client after adding the connector
 - Check that the server URL is correct: `https://your-worker-domain.com/sse`
 
 ### JSON Configuration Issues
 - Ensure the `M365_ACCESS_TOKEN` environment variable is set
 - Check that your OAuth access token hasn't expired
 - Verify the path to the index.js file is correct
-- Restart Claude Desktop after configuration changes
+- Restart your MCP client after configuration changes
 
 ## How It Works
 
-This connector bridges Claude Desktop with the Microsoft 365 MCP Server:
+This connector bridges MCP clients with the Microsoft 365 MCP Server:
 
 1. **Authentication**: Uses OAuth 2.1 with Microsoft Graph API
 2. **Security**: All tokens encrypted and stored securely  

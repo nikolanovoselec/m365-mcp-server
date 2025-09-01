@@ -29,7 +29,7 @@ class Microsoft365MCPServer {
       console.error('1. Register OAuth client:');
       console.error(`   curl -X POST ${M365_SERVER_URL}/register \\`);
       console.error('     -H "Content-Type: application/json" \\');
-      console.error('     -d \'{"client_name":"claude-desktop","redirect_uris":["http://localhost:8080/callback"]}\'');
+      console.error('     -d \'{"client_name":"mcp-client","redirect_uris":["http://localhost:8080/callback"]}\'');
       console.error('\n2. Complete OAuth flow with returned client_id and client_secret');
       console.error('3. Set access token: export M365_ACCESS_TOKEN="your_token_here"\n');
       process.exit(1);

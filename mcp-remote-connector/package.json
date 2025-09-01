@@ -1,11 +1,11 @@
 {
-  "name": "m365-mcp-desktop",
+  "name": "m365-mcp-remote-connector",
   "version": "1.0.0",
-  "description": "Microsoft 365 MCP Server for Claude Desktop",
+  "description": "Microsoft 365 Remote MCP Connector",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "m365-mcp-desktop": "dist/index.js"
+    "m365-mcp-remote-connector": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
