@@ -1,4 +1,4 @@
-# Microsoft 365 MCP Server
+# Microsoft 365 Remote MCP Server - built using Cloudflare Workers
 
 A production-grade Model Context Protocol (MCP) server that provides secure access to Microsoft 365 services through OAuth 2.1 + PKCE authentication. Built on Cloudflare Workers with enterprise-level security and native integration support with Claude, Gemini, ChatGPT, Copilot and other services that support official MCP specification as outlined here - https://modelcontextprotocol.io/docs/getting-started/intro.
 
