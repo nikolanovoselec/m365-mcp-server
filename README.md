@@ -5,7 +5,7 @@ A production-grade Model Context Protocol (MCP) server that provides secure acce
 ## Key Features
 
 - **OAuth 2.1 + PKCE + Dynamic Client Registration** - Industry-standard security
-- **Claude Desktop Native Support** - Direct remote MCP connections without localhost dependency  
+- **Native Remote MCP Support** - Direct remote MCP connections without localhost dependency  
 - **Complete Microsoft 365 Integration** - Email, Calendar, Teams, Contacts, and OnlineMeetings
 - **Cloudflare Workers Deployment** - Global edge network with Durable Objects persistence
 - **Session Management** - Persistent authentication with automatic token refresh
