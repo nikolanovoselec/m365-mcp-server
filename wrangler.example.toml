@@ -1,0 +1,58 @@
+# Cloudflare Workers Configuration - Example Template
+# Copy this to wrangler.toml and replace placeholders with actual values
+
+name = "your-mcp-server-name"
+main = "src/index.ts"
+compatibility_date = "2024-11-05"
+compatibility_flags = ["nodejs_compat"]
+
+# Replace with your Cloudflare account ID
+account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+
+# Custom domain routing (optional)
+# routes = [
+#   { pattern = "your-domain.com/*", zone_name = "your-domain.com" }
+# ]
+
+# Environment Variables
+[vars]
+MICROSOFT_CLIENT_ID = "YOUR_AZURE_AD_CLIENT_ID"
+MICROSOFT_TENANT_ID = "YOUR_AZURE_AD_TENANT_ID"
+GRAPH_API_VERSION = "v1.0"
+
+# Deployment configuration
+WORKER_DOMAIN = "your-worker-name.your-subdomain.workers.dev"
+PROTOCOL = "https"
+
+# Durable Objects
+[durable_objects]
+bindings = [
+  { name = "MICROSOFT_MCP_AGENT", class_name = "MicrosoftMCPAgent" }
+]
+
+# KV Namespaces
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "YOUR_OAUTH_KV_NAMESPACE_ID"
+preview_id = "YOUR_OAUTH_KV_PREVIEW_ID"
+
+[[kv_namespaces]]
+binding = "CONFIG_KV"
+id = "YOUR_CONFIG_KV_NAMESPACE_ID"
+preview_id = "YOUR_CONFIG_KV_PREVIEW_ID"
+
+[[kv_namespaces]]
+binding = "CACHE_KV"
+id = "YOUR_CACHE_KV_NAMESPACE_ID"
+preview_id = "YOUR_CACHE_KV_PREVIEW_ID"
+
+# Secrets (deploy via: wrangler secret put SECRET_NAME)
+# - MICROSOFT_CLIENT_SECRET
+# - ENCRYPTION_KEY  
+# - COOKIE_SECRET
+# - COOKIE_ENCRYPTION_KEY
+
+# Migration Information
+[[migrations]]
+tag = "v1"
+new_classes = ["MicrosoftMCPAgent"]

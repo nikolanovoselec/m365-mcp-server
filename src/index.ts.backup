@@ -1,0 +1,718 @@
+/**
+ * Microsoft 365 MCP Server - Unified Endpoint Architecture
+ * Supports Claude Desktop direct connector + mcp-remote with single /sse endpoint
+ */
+
+import OAuthProvider from '@cloudflare/workers-oauth-provider';
+import { MicrosoftMCPAgent } from './microsoft-mcp-agent';
+import { MicrosoftHandler } from './microsoft-handler';
+
+export interface Env {
+  // Environment variables
+  MICROSOFT_CLIENT_ID: string;
+  MICROSOFT_TENANT_ID: string;
+  GRAPH_API_VERSION: string;
+  
+  // Deployment configuration
+  WORKER_DOMAIN: string;  // e.g., "your-worker.your-subdomain.workers.dev"
+  PROTOCOL: string;       // "https" or "http" for development
+
+  // Secrets
+  MICROSOFT_CLIENT_SECRET: string;
+  COOKIE_ENCRYPTION_KEY: string;
+  ENCRYPTION_KEY: string;
+  COOKIE_SECRET: string;
+
+  // Durable Objects
+  MICROSOFT_MCP_AGENT: DurableObjectNamespace;
+
+  // KV Namespaces
+  CONFIG_KV: KVNamespace;
+  CACHE_KV: KVNamespace;
+
+  // OAuth KV (required by OAuthProvider)
+  OAUTH_KV: KVNamespace;
+}
+
+// Microsoft OAuth token response type
+interface MicrosoftTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  refresh_token?: string;
+  scope: string;
+}
+
+// Microsoft OAuth token exchange functions
+async function exchangeMicrosoftTokens(
+  authorizationCode: string,
+  env: Env,
+  redirectUri: string
+): Promise<MicrosoftTokenResponse> {
+  const tokenUrl = `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/token`;
+
+  const params = new URLSearchParams({
+    client_id: env.MICROSOFT_CLIENT_ID,
+    client_secret: env.MICROSOFT_CLIENT_SECRET,
+    code: authorizationCode,
+    redirect_uri: redirectUri,
+    grant_type: 'authorization_code',
+    scope:
+      'User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.Read Calendars.ReadWrite Contacts.ReadWrite OnlineMeetings.ReadWrite ChannelMessage.Send Team.ReadBasic.All offline_access',
+  });
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: params.toString(),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Microsoft token exchange failed: ${response.status} ${error}`);
+  }
+
+  return (await response.json()) as MicrosoftTokenResponse;
+}
+
+async function refreshMicrosoftTokens(
+  refreshToken: string,
+  env: Env
+): Promise<MicrosoftTokenResponse> {
+  const tokenUrl = `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/token`;
+
+  const params = new URLSearchParams({
+    client_id: env.MICROSOFT_CLIENT_ID,
+    client_secret: env.MICROSOFT_CLIENT_SECRET,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token',
+    scope:
+      'User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.Read Calendars.ReadWrite Contacts.ReadWrite OnlineMeetings.ReadWrite ChannelMessage.Send Team.ReadBasic.All offline_access',
+  });
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: params.toString(),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Microsoft token refresh failed: ${response.status} ${error}`);
+  }
+
+  return (await response.json()) as MicrosoftTokenResponse;
+}
+
+// 🔥 UNIFIED ENDPOINT ARCHITECTURE
+// Single /sse endpoint supporting GET, POST, and WebSocket for all clients
+// - Claude Desktop: GET (SSE validation) + WebSocket upgrade
+// - mcp-remote: WebSocket with OAuth flow
+// - Direct testing: POST JSON-RPC
+
+// Create OAuth provider for authentication flows
+const oauthProvider = new OAuthProvider({
+  // MCP server on unified endpoint
+  apiRoute: '/sse',
+  apiHandler: MicrosoftMCPAgent.mount('/sse'),
+
+  // Default handler for OAuth authorization flow
+  defaultHandler: MicrosoftHandler as any,
+
+  // OAuth endpoints
+  authorizeEndpoint: '/authorize',
+  tokenEndpoint: '/token',
+  clientRegistrationEndpoint: '/register',
+
+  // Supported scopes
+  scopesSupported: [
+    'User.Read',
+    'Mail.Read',
+    'Mail.ReadWrite',
+    'Mail.Send',
+    'Calendars.Read',
+    'Calendars.ReadWrite',
+    'Contacts.ReadWrite',
+    'OnlineMeetings.ReadWrite',
+    'ChannelMessage.Send',
+    'Team.ReadBasic.All',
+  ],
+
+  // Token exchange callback - integrates Microsoft tokens into OAuth flow
+  tokenExchangeCallback: async (options: any) => {
+    const env = options.env as Env;
+
+    if (options.grantType === 'authorization_code') {
+      // The MicrosoftHandler has stored the Microsoft authorization code in props
+      const microsoftAuthCode = options.props.microsoftAuthCode;
+      const redirectUri = options.props.microsoftRedirectUri;
+
+      if (!microsoftAuthCode) {
+        throw new Error('No Microsoft authorization code available');
+      }
+
+      try {
+        // Exchange Microsoft authorization code for access tokens
+        const microsoftTokens = await exchangeMicrosoftTokens(microsoftAuthCode, env, redirectUri);
+
+        return {
+          // Store Microsoft access token in the access token props for the MCP agent
+          accessTokenProps: {
+            ...options.props,
+            microsoftAccessToken: microsoftTokens.access_token,
+            microsoftTokenType: microsoftTokens.token_type,
+            microsoftScope: microsoftTokens.scope,
+          },
+          // Store Microsoft refresh token in the grant for future refreshes
+          newProps: {
+            ...options.props,
+            microsoftRefreshToken: microsoftTokens.refresh_token,
+          },
+          // Match Microsoft token TTL
+          accessTokenTTL: microsoftTokens.expires_in,
+        };
+      } catch (error) {
+        console.error('Microsoft token exchange failed:', error);
+        throw error;
+      }
+    }
+
+    if (options.grantType === 'refresh_token') {
+      // Refresh Microsoft tokens using stored refresh token
+      const refreshToken = options.props.microsoftRefreshToken;
+
+      if (!refreshToken) {
+        throw new Error('No Microsoft refresh token available');
+      }
+
+      try {
+        const microsoftTokens = await refreshMicrosoftTokens(refreshToken, env);
+
+        return {
+          accessTokenProps: {
+            ...options.props,
+            microsoftAccessToken: microsoftTokens.access_token,
+            microsoftTokenType: microsoftTokens.token_type,
+            microsoftScope: microsoftTokens.scope,
+          },
+          newProps: {
+            ...options.props,
+            microsoftRefreshToken: microsoftTokens.refresh_token || refreshToken,
+          },
+          accessTokenTTL: microsoftTokens.expires_in,
+        };
+      } catch (error) {
+        console.error('Microsoft token refresh failed:', error);
+        throw error;
+      }
+    }
+
+    // For other grant types, return unchanged
+    return {};
+  },
+});
+
+// Unified handler supporting GET, POST, and WebSocket on single /sse endpoint
+const unifiedHandler = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    
+    // Route 1: Unified MCP endpoint with multi-protocol support
+    if (url.pathname === '/sse' || url.pathname.startsWith('/sse/')) {
+      return handleUnifiedMcp(request, env, ctx);
+    }
+    
+    // Route 2: Health check
+    if (url.pathname === '/health') {
+      return new Response(JSON.stringify({
+        status: 'healthy',
+        service: 'Microsoft 365 MCP Server - Unified Endpoint',
+        timestamp: new Date().toISOString(),
+        architecture: 'Single /sse endpoint with multi-protocol support',
+        protocols: {
+          'GET': 'SSE validation for Claude Desktop',
+          'POST': 'Direct JSON-RPC for testing',
+          'WebSocket': 'Full MCP protocol with OAuth'
+        },
+        endpoints: {
+          'mcp-server': '/sse (all protocols)',
+          'health': '/health',
+          'authorization': '/authorize'
+        },
+        documentation: 'https://github.com/nikolanovoselec/m365-mcp-server'
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    // Route 3: Service info
+    if (url.pathname === '/' || url.pathname === '/info') {
+      return new Response(JSON.stringify({
+        service: 'Microsoft 365 MCP Server',
+        version: '0.3.0',
+        architecture: 'Unified Endpoint',
+        configurations: {
+          claude_desktop_direct: {
+            url: `${env.PROTOCOL}://${env.WORKER_DOMAIN}/sse`,
+            description: 'Direct web connector'
+          },
+          mcp_remote: {
+            command: 'npx',
+            args: ['mcp-remote', `${env.PROTOCOL}://${env.WORKER_DOMAIN}/sse`],
+            description: 'Traditional MCP-remote configuration'
+          }
+        },
+        note: 'Both configurations use the same unified endpoint with automatic protocol detection',
+        documentation: 'https://github.com/nikolanovoselec/m365-mcp-server'
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    // Route 4: All other OAuth routes (authorize, token, register) - delegate to OAuth provider
+    return oauthProvider.fetch(request, env, ctx);
+  }
+};
+
+// Handle unified MCP endpoint with GET, POST, and WebSocket support
+async function handleUnifiedMcp(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  
+  // DEBUG: Log all headers to understand what we're receiving
+  const allHeaders = Object.fromEntries(request.headers.entries());
+  console.log('Request details:', {
+    method: request.method,
+    url: request.url,
+    headers: allHeaders
+  });
+  
+  // Protocol 1: WebSocket upgrade requests (mcp-remote and OAuth-capable clients)
+  // Check this FIRST because WebSocket upgrades are also GET requests
+  const upgradeHeader = request.headers.get('Upgrade');
+  const connectionHeader = request.headers.get('Connection');
+  const webSocketKey = request.headers.get('Sec-WebSocket-Key');
+  const webSocketVersion = request.headers.get('Sec-WebSocket-Version');
+  
+  console.log('WebSocket check:', { upgradeHeader, connectionHeader, webSocketKey, webSocketVersion });
+  
+  // All WebSocket requests: delegate to OAuth provider (handles WebSocket natively)
+  if ((upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') ||
+      (connectionHeader && connectionHeader.toLowerCase().includes('upgrade')) ||
+      (webSocketKey && webSocketVersion)) {
+    console.log('WebSocket upgrade detected - delegating to OAuth provider with native WebSocket support');
+    return oauthProvider.fetch(request, env, ctx);
+  }
+  
+  // Protocol 2: GET requests with SSE headers
+  if (request.method === 'GET') {
+    const acceptHeader = request.headers.get('Accept');
+    if (acceptHeader && acceptHeader.includes('text/event-stream')) {
+      // All SSE requests get the same validation response
+      // mcp-remote will then switch to WebSocket for the actual MCP protocol
+      console.log('SSE validation request (Claude Desktop or mcp-remote)');
+      return handleSseValidation(request, env);
+    }
+    return new Response('GET requests must include Accept: text/event-stream for SSE or Upgrade: websocket', { status: 400 });
+  }
+  
+  // Protocol 3: POST requests (Direct JSON-RPC for testing/debugging)
+  if (request.method === 'POST') {
+    return handleDirectJsonRpc(request, env);
+  }
+  
+  return new Response('Unsupported method - Use GET (SSE), POST (JSON-RPC), or WebSocket upgrade', { status: 405 });
+}
+
+// Handle SSE validation for Claude Desktop web connector
+async function handleConditionalWebSocket(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  console.log('Conditional WebSocket handler - creating custom WebSocket with MCP message inspection');
+  
+  // In Cloudflare HTTP/2 environment, we need to check WebSocket-specific headers
+  const webSocketKey = request.headers.get('Sec-WebSocket-Key');
+  const webSocketVersion = request.headers.get('Sec-WebSocket-Version');
+  
+  if (!webSocketKey || !webSocketVersion) {
+    return new Response('Expected WebSocket upgrade (missing Sec-WebSocket-* headers)', { status: 400 });
+  }
+
+  // Create WebSocket pair
+  const webSocketPair = new WebSocketPair();
+  const [client, server] = Object.values(webSocketPair);
+
+  // Accept the WebSocket connection
+  server.accept();
+
+  // Handle WebSocket messages with conditional authentication
+  server.addEventListener('message', async (event) => {
+    try {
+      const message = JSON.parse(event.data as string);
+      console.log('WebSocket message received:', message);
+
+      // Allow MCP handshake methods without authentication
+      const unprotectedMethods = ['initialize', 'initialized', 'list_tools', 'list_resources', 'list_prompts'];
+      
+      if (unprotectedMethods.includes(message.method)) {
+        console.log(`Allowing unprotected method: ${message.method}`);
+        
+        // Handle the method directly
+        const response = await handleMcpMethod(message, env);
+        
+        // Only send response if there is one (initialized doesn't need response)
+        if (response !== null) {
+          server.send(JSON.stringify(response));
+        }
+      } else {
+        console.log(`Protected method ${message.method} requires authentication`);
+        
+        // Send authentication required error
+        const errorResponse = {
+          jsonrpc: '2.0',
+          id: message.id,
+          error: {
+            code: -32001,
+            message: 'Authentication required',
+            data: {
+              auth_url: `https://${new URL(request.url).host}/authorize`,
+              error_description: 'This tool requires Microsoft 365 authentication. Please visit the auth_url to authenticate.'
+            }
+          }
+        };
+        server.send(JSON.stringify(errorResponse));
+      }
+    } catch (error) {
+      console.error('WebSocket message processing error:', error);
+      const errorResponse = {
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32700,
+          message: 'Parse error',
+          data: { error: String(error) }
+        }
+      };
+      server.send(JSON.stringify(errorResponse));
+    }
+  });
+
+  server.addEventListener('close', () => {
+    console.log('WebSocket connection closed');
+  });
+
+  server.addEventListener('error', (event) => {
+    console.error('WebSocket error:', event);
+  });
+
+  // Return the WebSocket response
+  return new Response(null, {
+    status: 101,
+    webSocket: client,
+  });
+}
+
+// Handle MCP method for unprotected operations
+async function handleMcpMethod(message: any, env: Env): Promise<any> {
+  const { method, params, id } = message;
+
+  switch (method) {
+    case 'initialize':
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          protocolVersion: '2024-11-05',
+          serverInfo: {
+            name: 'microsoft-365-mcp',
+            version: '0.3.0',
+          },
+          capabilities: {
+            tools: {},
+            resources: {},
+            prompts: {},
+          },
+        },
+      };
+
+    case 'initialized':
+      // No response needed for initialized
+      return null;
+
+    case 'list_tools':
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          tools: [
+            {
+              name: 'sendEmail',
+              description: 'Send an email via Outlook',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  to: { type: 'string', description: 'Recipient email address' },
+                  subject: { type: 'string', description: 'Email subject' },
+                  body: { type: 'string', description: 'Email body content' },
+                },
+                required: ['to', 'subject', 'body'],
+              },
+            },
+            {
+              name: 'getEmails',
+              description: 'Get recent emails from Outlook',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  limit: { type: 'number', description: 'Number of emails to retrieve (default: 10)' },
+                },
+              },
+            },
+            {
+              name: 'getCalendarEvents',
+              description: 'Get upcoming calendar events',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  limit: { type: 'number', description: 'Number of events to retrieve (default: 10)' },
+                },
+              },
+            },
+            {
+              name: 'authenticate',
+              description: 'Get Microsoft 365 authentication URL',
+              inputSchema: {
+                type: 'object',
+                properties: {},
+              },
+            },
+          ],
+        },
+      };
+
+    case 'list_resources':
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          resources: [],
+        },
+      };
+
+    case 'list_prompts':
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          prompts: [],
+        },
+      };
+
+    default:
+      return {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32601,
+          message: 'Method not found',
+          data: { method },
+        },
+      };
+  }
+}
+
+// Handle SSE validation for Claude Desktop web connector
+async function handleSseValidation(request: Request, env: Env): Promise<Response> {
+  console.log('Claude Desktop SSE validation - returning SSE headers');
+  
+  return new Response('', {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Accept, Upgrade, Connection'
+    }
+  });
+}
+
+// Handle direct JSON-RPC requests for testing
+async function handleDirectJsonRpc(request: Request, env: Env): Promise<Response> {
+  try {
+    const body = await request.text();
+    const message = JSON.parse(body);
+    
+    if (!message.method) {
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: message.id || null,
+        error: { code: -32600, message: 'Invalid request - missing method' }
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    // Allow MCP handshake methods without authentication
+    const handshakeMethods = ['initialize', 'list_tools', 'list_resources', 'list_prompts'];
+    
+    if (handshakeMethods.includes(message.method)) {
+      console.log(`Direct JSON-RPC handshake: ${message.method}`);
+      
+      switch (message.method) {
+        case 'initialize':
+          return new Response(JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              protocolVersion: '2024-11-05',
+              serverInfo: {
+                name: 'microsoft-365-mcp',
+                version: '0.3.0'
+              },
+              capabilities: {
+                tools: {},
+                resources: {},
+                prompts: {}
+              }
+            }
+          }), {
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+        case 'list_tools':
+          return new Response(JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              tools: [
+                {
+                  name: 'sendEmail',
+                  description: 'Send an email via Outlook',
+                  inputSchema: {
+                    type: 'object',
+                    properties: {
+                      to: { type: 'string', description: 'Recipient email address' },
+                      subject: { type: 'string', description: 'Email subject' },
+                      body: { type: 'string', description: 'Email body content' },
+                      contentType: { type: 'string', enum: ['text', 'html'], default: 'html' }
+                    },
+                    required: ['to', 'subject', 'body']
+                  }
+                },
+                {
+                  name: 'getEmails',
+                  description: 'Get recent emails',
+                  inputSchema: {
+                    type: 'object',
+                    properties: {
+                      count: { type: 'number', maximum: 50, default: 10 },
+                      folder: { type: 'string', default: 'inbox' }
+                    }
+                  }
+                },
+                {
+                  name: 'getCalendarEvents', 
+                  description: 'Get calendar events',
+                  inputSchema: {
+                    type: 'object',
+                    properties: {
+                      days: { type: 'number', maximum: 30, default: 7 }
+                    }
+                  }
+                },
+                {
+                  name: 'authenticate',
+                  description: 'Get authentication URL for Microsoft 365',
+                  inputSchema: {
+                    type: 'object',
+                    properties: {}
+                  }
+                }
+              ]
+            }
+          }), {
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+        case 'list_resources':
+        case 'list_prompts':
+          return new Response(JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { [message.method.split('_')[1]]: [] }
+          }), {
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+        default:
+          return new Response(JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: { code: -32601, message: 'Method not found' }
+          }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          });
+      }
+    }
+    
+    // Tool calls require authentication
+    if (message.method === 'call_tool') {
+      const host = request.headers.get('host') || env.WORKER_DOMAIN;
+      
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: message.id,
+        error: {
+          code: -32001,
+          message: 'Authentication required',
+          data: {
+            error: 'microsoft_oauth_required',
+            auth_url: `https://${host}/authorize`,
+            instructions: [
+              'Microsoft 365 authentication is required to use tools.',
+              'For full authentication support, use mcp-remote:',
+              `npx mcp-remote https://${host}/sse`
+            ]
+          }
+        }
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    // Other methods
+    return new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: message.id,
+      error: { code: -32601, message: 'Method not supported in direct mode' }
+    }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+  } catch (error) {
+    console.error('JSON-RPC parsing error:', error);
+    
+    return new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: null,
+      error: { 
+        code: -32700, 
+        message: 'Parse error',
+        data: { details: error instanceof Error ? error.message : 'Unknown error' }
+      }
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+export default unifiedHandler;
+
+// Export Durable Object classes
+export { MicrosoftMCPAgent } from './microsoft-mcp-agent';

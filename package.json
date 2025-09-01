@@ -1,0 +1,43 @@
+{
+  "name": "m365-mcp-server",
+  "version": "1.0.0",
+  "description": "Microsoft 365 MCP Server for Cloudflare Workers",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "format": "prettier --write .",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.0.6",
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "agents": "^0.0.113",
+    "hono": "^4.9.5",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241011.1",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.55.0",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.0",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.33.1"
+  },
+  "keywords": [
+    "mcp",
+    "microsoft",
+    "office365",
+    "teams",
+    "cloudflare",
+    "workers"
+  ],
+  "author": "Nikola Novoselec",
+  "license": "MIT"
+}

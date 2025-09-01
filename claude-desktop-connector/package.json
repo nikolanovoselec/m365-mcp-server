@@ -1,0 +1,22 @@
+{
+  "name": "m365-mcp-desktop",
+  "version": "1.0.0",
+  "description": "Microsoft 365 MCP Server for Claude Desktop",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "m365-mcp-desktop": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
