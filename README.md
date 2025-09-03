@@ -46,7 +46,7 @@ MCP servers act as bridges between AI applications and external services, exposi
 
 ## Why Microsoft 365 Integration?
 
-Honestly? Because I already had a Microsoft 365 Business subscription for my actual business, and it felt wrong to have all those API endpoints just sitting there, unused and unloved. Turns out, building an OAuth integration for Microsoft's enterprise ecosystem is like solving a Rubik's cube blindfolded - technically possible, surprisingly satisfying when it works, and it makes you look way smarter than you actually are at dinner parties. 
+Honestly? Because I already had a Microsoft 365 Business subscription for my actual business, and it felt wrong to have all those API endpoints just sitting there, unused and unloved. Turns out, building an OAuth integration for Microsoft's enterprise ecosystem is like solving a Rubik's cube blindfolded - technically possible, surprisingly satisfying when it works, and it makes you look way smarter than you actually are at dinner parties.
 
 The beautiful part is that this could have been ANY service - Google Workspace, Slack, Discord, whatever has OAuth 2.1. The architecture I accidentally over-engineered is completely service-agnostic. Just swap out the Microsoft Graph endpoints for any other OAuth-compatible API, and boom - you've got yourself an MCP server for your favorite service. But since I had M365 lying around and those Exchange endpoints were calling my name...
 
@@ -68,11 +68,9 @@ Before setting up the Microsoft 365 MCP Server, ensure you have:
 - [ ] **Microsoft 365 Account** (Business or Enterprise)
   - Admin access for app registration
   - Active subscription with Exchange Online
-  
 - [ ] **Microsoft Entra ID Access** (formerly Azure AD)
   - Ability to register applications
   - Permission to grant admin consent
-  
 - [ ] **Cloudflare Account** (Free tier supported)
   - Workers & KV storage enabled
   - Custom domain (optional for production)
@@ -80,6 +78,7 @@ Before setting up the Microsoft 365 MCP Server, ensure you have:
 ### Required Permissions
 
 Your Microsoft 365 administrator must grant these Graph API permissions:
+
 - `User.Read` - Read user profile
 - `Mail.Read`, `Mail.ReadWrite`, `Mail.Send` - Email operations
 - `Calendars.Read`, `Calendars.ReadWrite` - Calendar access
@@ -107,11 +106,11 @@ Your Microsoft 365 administrator must grant these Graph API permissions:
 
 ## Documentation
 
-| Document                                  | Description                                                   |
-| ----------------------------------------- | ------------------------------------------------------------- |
-| **[Technical Reference](TECHNICAL.md)**   | Complete technical documentation, architecture, and API docs |
-| **[Operations Guide](OPERATIONS.md)**     | Development, deployment, and maintenance procedures          |
-| **README.md**                             | This file - overview, quick start, and troubleshooting      |
+| Document                                | Description                                                  |
+| --------------------------------------- | ------------------------------------------------------------ |
+| **[Technical Reference](TECHNICAL.md)** | Complete technical documentation, architecture, and API docs |
+| **[Operations Guide](OPERATIONS.md)**   | Development, deployment, and maintenance procedures          |
+| **README.md**                           | This file - overview, quick start, and troubleshooting       |
 
 ## Quick Start Guide
 
@@ -156,14 +155,14 @@ curl -X GET https://graph.microsoft.com/v1.0/me \
 
 ### Common Issues Quick Fixes
 
-| Issue | Quick Fix |
-|-------|-----------|
+| Issue                | Quick Fix                                          |
+| -------------------- | -------------------------------------------------- |
 | 404 on /sse endpoint | User not authenticated - complete OAuth flow first |
-| 401 from Graph API | Token expired - OAuth Provider should auto-refresh |
-| 403 from Graph API | Missing permissions - check Azure AD app scopes |
-| 429 rate limiting | Implement exponential backoff in your client |
-| WebSocket fails | Expected - Cloudflare uses HTTP/2, fallback to SSE |
-| Empty discovery | Check Durable Object binding in wrangler.toml |
+| 401 from Graph API   | Token expired - OAuth Provider should auto-refresh |
+| 403 from Graph API   | Missing permissions - check Azure AD app scopes    |
+| 429 rate limiting    | Implement exponential backoff in your client       |
+| WebSocket fails      | Expected - Cloudflare uses HTTP/2, fallback to SSE |
+| Empty discovery      | Check Durable Object binding in wrangler.toml      |
 
 ### Option 1: AI Assistant Integration (Recommended)
 
@@ -237,12 +236,10 @@ curl -X POST https://your-worker-domain.com/sse \
   - Supports HTML and plain text
   - Multiple recipients (to, cc, bcc)
   - File attachments support
-  
 - **`getEmails`** - Retrieve emails from folders
   - Configurable count (max 50)
   - Folder selection (inbox, sent, drafts)
   - Returns sender, subject, body, date
-  
 - **`searchEmails`** - Search emails with queries
   - Microsoft Graph search syntax
   - Full-text search across all folders
@@ -254,7 +251,6 @@ curl -X POST https://your-worker-domain.com/sse \
   - Date range filtering
   - Returns title, attendees, location
   - Includes online meeting links
-  
 - **`createCalendarEvent`** - Create new events
   - Set title, description, location
   - Add multiple attendees
@@ -267,7 +263,6 @@ curl -X POST https://your-worker-domain.com/sse \
   - Channel and team selection
   - Rich text formatting
   - Mentions support
-  
 - **`createTeamsMeeting`** - Schedule Teams meetings
   - Set date, time, duration
   - Add attendees
@@ -286,64 +281,69 @@ curl -X POST https://your-worker-domain.com/sse \
 ### Email Automation
 
 **Daily Summary Report**
+
 ```javascript
 // Fetch recent emails
-const emails = await mcp.call('getEmails', { count: 20, folder: 'inbox' });
+const emails = await mcp.call("getEmails", { count: 20, folder: "inbox" });
 
 // Generate summary
-const summary = emails.map(e => `${e.from}: ${e.subject}`).join('\n');
+const summary = emails.map((e) => `${e.from}: ${e.subject}`).join("\n");
 
 // Send report
-await mcp.call('sendEmail', {
-  to: 'manager@company.com',
-  subject: 'Daily Email Summary',
+await mcp.call("sendEmail", {
+  to: "manager@company.com",
+  subject: "Daily Email Summary",
   body: `<h2>Today's Emails</h2><pre>${summary}</pre>`,
-  contentType: 'html'
+  contentType: "html",
 });
 ```
 
 ### Calendar Scheduling
 
 **Meeting Coordination**
+
 ```javascript
 // Check availability
-const events = await mcp.call('getCalendarEvents', {
-  startDateTime: '2025-01-10T09:00:00',
-  endDateTime: '2025-01-10T17:00:00'
+const events = await mcp.call("getCalendarEvents", {
+  startDateTime: "2025-01-10T09:00:00",
+  endDateTime: "2025-01-10T17:00:00",
 });
 
 // Find free slot
 const freeSlot = findAvailableTime(events);
 
 // Schedule meeting
-await mcp.call('createCalendarEvent', {
-  subject: 'Project Review',
+await mcp.call("createCalendarEvent", {
+  subject: "Project Review",
   startDateTime: freeSlot.start,
   endDateTime: freeSlot.end,
-  attendees: ['team@company.com'],
-  isOnlineMeeting: true
+  attendees: ["team@company.com"],
+  isOnlineMeeting: true,
 });
 ```
 
 ### Teams Notifications
 
 **Automated Status Updates**
+
 ```javascript
 // Send project update
-await mcp.call('sendTeamsMessage', {
-  teamId: 'project-team-id',
-  channelId: 'general',
-  message: 'Deployment completed successfully\n\nVersion 2.0.1 is now live in production.'
+await mcp.call("sendTeamsMessage", {
+  teamId: "project-team-id",
+  channelId: "general",
+  message:
+    "Deployment completed successfully\n\nVersion 2.0.1 is now live in production.",
 });
 ```
 
 ### Contact Search
 
 **Quick Contact Lookup**
+
 ```javascript
 // Search for contact
-const contacts = await mcp.call('getContacts', {
-  search: 'John Doe'
+const contacts = await mcp.call("getContacts", {
+  search: "John Doe",
 });
 
 // Get email and phone
@@ -386,14 +386,16 @@ Direct API mapping to Microsoft Graph endpoints:
 ### Authentication Issues
 
 **Problem: "401 Unauthorized" errors**
+
 - **Cause**: Token expired or invalid
-- **Solution**: 
+- **Solution**:
   1. Check redirect URI matches exactly in Azure app registration
   2. Verify client secret hasn't expired (check Azure portal)
   3. Ensure admin consent granted for all permissions
   4. Try re-authenticating with `mcp-remote auth m365`
 
 **Problem: "403 Forbidden" on specific operations**
+
 - **Cause**: Missing Microsoft Graph permissions
 - **Solution**:
   1. Check required scopes in error message
@@ -404,6 +406,7 @@ Direct API mapping to Microsoft Graph endpoints:
 ### Connection Issues
 
 **Problem: WebSocket connection fails**
+
 - **Cause**: HTTP/2 header issues or firewall
 - **Solution**:
   1. Check if behind corporate proxy
@@ -412,6 +415,7 @@ Direct API mapping to Microsoft Graph endpoints:
   4. Check browser console for specific errors
 
 **Problem: Tools not appearing in AI assistant**
+
 - **Cause**: MCP server not properly configured
 - **Solution**:
   1. Verify config file location and syntax
@@ -422,6 +426,7 @@ Direct API mapping to Microsoft Graph endpoints:
 ### Microsoft Graph Errors
 
 **Problem: "Insufficient privileges to complete the operation"**
+
 - **Cause**: Missing admin consent or scope
 - **Solution**:
   1. Login to Azure portal as admin
@@ -430,6 +435,7 @@ Direct API mapping to Microsoft Graph endpoints:
   4. Wait 5-10 minutes for propagation
 
 **Problem: "The mailbox is either inactive, soft-deleted, or is hosted on-premise"**
+
 - **Cause**: Exchange Online not configured
 - **Solution**:
   1. Verify Microsoft 365 subscription includes Exchange
@@ -439,6 +445,7 @@ Direct API mapping to Microsoft Graph endpoints:
 ### Rate Limiting
 
 **Problem: "429 Too Many Requests"**
+
 - **Cause**: Microsoft Graph API rate limit (2000/min)
 - **Solution**:
   1. Implement exponential backoff

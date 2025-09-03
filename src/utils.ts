@@ -1,32 +1,32 @@
 /**
  * Utility Functions for Microsoft Identity Platform OAuth Integration
- * 
+ *
  * SCOPE:
  * - OAuth 2.1 URL construction for Microsoft authorization endpoints
  * - Token exchange implementation for authorization code flow
  * - Error handling for Microsoft Identity Platform responses
- * 
+ *
  * ARCHITECTURE:
  * These utilities bridge the OAuth Provider with Microsoft's OAuth implementation,
  * handling the specifics of Microsoft's OAuth 2.1 + PKCE requirements.
  */
 
-import { Props } from './microsoft-mcp-agent';
+import { Props } from "./microsoft-mcp-agent";
 
 export { Props };
 
 /**
  * Build OAuth 2.1 authorization URL for Microsoft Identity Platform
- * 
+ *
  * Constructs a properly formatted authorization URL following Microsoft's
  * OAuth 2.1 implementation with all required parameters.
- * 
+ *
  * PARAMETERS EXPLAINED:
  * - response_type: 'code' for authorization code flow
  * - response_mode: 'query' returns code as query parameter
  * - state: Preserves request context through OAuth flow
  * - scope: Space-separated list of Microsoft Graph permissions
- * 
+ *
  * @param params - Authorization URL parameters
  * @param params.client_id - Microsoft application (client) ID from Azure AD
  * @param params.redirect_uri - Callback URL registered in Azure AD
@@ -43,31 +43,31 @@ export function getUpstreamAuthorizeUrl(params: {
   upstream_url: string;
 }) {
   const url = new URL(params.upstream_url);
-  url.searchParams.set('client_id', params.client_id);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('redirect_uri', params.redirect_uri);
-  url.searchParams.set('scope', params.scope);
-  url.searchParams.set('state', params.state);
-  url.searchParams.set('response_mode', 'query');
+  url.searchParams.set("client_id", params.client_id);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", params.redirect_uri);
+  url.searchParams.set("scope", params.scope);
+  url.searchParams.set("state", params.state);
+  url.searchParams.set("response_mode", "query");
 
   return url.toString();
 }
 
 /**
  * Exchange authorization code for access tokens with Microsoft Identity Platform
- * 
+ *
  * Implements OAuth 2.1 token exchange endpoint call with proper error handling
  * and response validation. Used by OAuth Provider tokenExchangeCallback.
- * 
+ *
  * ERROR HANDLING:
  * Returns tuple pattern for explicit error handling without exceptions.
  * Caller must check for error response before using access token.
- * 
+ *
  * SECURITY:
  * - Uses application/x-www-form-urlencoded to prevent JSON injection
  * - Validates response before extracting tokens
  * - Returns detailed error messages for debugging
- * 
+ *
  * @param params - Token exchange parameters
  * @param params.client_id - Microsoft application (client) ID
  * @param params.client_secret - Microsoft application secret (keep secure!)
@@ -88,12 +88,12 @@ export async function fetchUpstreamAuthToken(params: {
    * Missing code indicates failed authorization or invalid callback
    */
   if (!params.code) {
-    return ['', new Response('Missing authorization code', { status: 400 })];
+    return ["", new Response("Missing authorization code", { status: 400 })];
   }
 
   /**
    * Construct token exchange request body
-   * 
+   *
    * Microsoft requires application/x-www-form-urlencoded format.
    * grant_type must be 'authorization_code' for initial token request.
    */
@@ -101,15 +101,15 @@ export async function fetchUpstreamAuthToken(params: {
     client_id: params.client_id,
     client_secret: params.client_secret,
     code: params.code,
-    grant_type: 'authorization_code',
+    grant_type: "authorization_code",
     redirect_uri: params.redirect_uri,
   });
 
   const response = await fetch(params.upstream_url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
     },
     body: body.toString(),
   });
@@ -118,19 +118,20 @@ export async function fetchUpstreamAuthToken(params: {
 
   /**
    * Handle token exchange errors
-   * 
+   *
    * Common errors:
    * - invalid_grant: Authorization code expired or already used
    * - invalid_client: Client ID/secret mismatch
    * - invalid_request: Missing or malformed parameters
    */
   if (!response.ok) {
-    const errorMsg = data.error_description || data.error || 'Token exchange failed';
+    const errorMsg =
+      data.error_description || data.error || "Token exchange failed";
     return [
-      '',
+      "",
       new Response(JSON.stringify({ error: errorMsg }), {
         status: response.status,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
       }),
     ];
   }

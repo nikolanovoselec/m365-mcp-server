@@ -5,6 +5,7 @@ Complete operational documentation for development, deployment, and maintenance 
 ## Table of Contents
 
 ### Part I: Development Operations
+
 - [Development Setup](#development-setup)
 - [Project Structure](#project-structure)
 - [Development Workflow](#development-workflow)
@@ -14,7 +15,8 @@ Complete operational documentation for development, deployment, and maintenance 
 - [Debugging Guide](#debugging-guide)
 - [Contributing Guidelines](#contributing-guidelines)
 
-### Part II: Deployment Operations  
+### Part II: Deployment Operations
+
 - [Prerequisites](#prerequisites)
 - [Production Deployment](#production-deployment)
 - [Environment Configuration](#environment-configuration)
@@ -24,6 +26,7 @@ Complete operational documentation for development, deployment, and maintenance 
 - [Maintenance Procedures](#maintenance-procedures)
 
 ### Part III: Advanced Operations
+
 - [Production Monitoring](#production-monitoring)
 
 ---
@@ -335,60 +338,60 @@ This example demonstrates the recommended testing pattern using Vitest framework
 
 ```typescript
 // tests/unit/microsoft-graph.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
-import { MicrosoftGraphClient } from '../../src/microsoft-graph';
+import { describe, it, expect, beforeEach } from "vitest";
+import { MicrosoftGraphClient } from "../../src/microsoft-graph";
 
-describe('MicrosoftGraphClient', () => {
+describe("MicrosoftGraphClient", () => {
   let client: MicrosoftGraphClient;
   let mockEnv: Env;
 
   beforeEach(() => {
     mockEnv = {
-      GRAPH_API_VERSION: 'v1.0',
-      MICROSOFT_CLIENT_ID: 'test-id',
+      GRAPH_API_VERSION: "v1.0",
+      MICROSOFT_CLIENT_ID: "test-id",
       // ... other env vars
     };
     client = new MicrosoftGraphClient(mockEnv);
   });
 
-  it('should send email successfully', async () => {
+  it("should send email successfully", async () => {
     const mockResponse = { status: 204, json: () => Promise.resolve({}) };
     global.fetch = vi.fn().mockResolvedValue(mockResponse);
 
-    const result = await client.sendEmail('fake-token', {
-      to: 'test@example.com',
-      subject: 'Test',
-      body: 'Hello',
+    const result = await client.sendEmail("fake-token", {
+      to: "test@example.com",
+      subject: "Test",
+      body: "Hello",
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://graph.microsoft.com/v1.0/me/sendMail',
+      "https://graph.microsoft.com/v1.0/me/sendMail",
       expect.objectContaining({
-        method: 'POST',
+        method: "POST",
         headers: expect.objectContaining({
-          Authorization: 'Bearer fake-token',
+          Authorization: "Bearer fake-token",
         }),
-      })
+      }),
     );
   });
 
-  it('should handle Microsoft Graph errors', async () => {
+  it("should handle Microsoft Graph errors", async () => {
     const mockError = {
       status: 400,
       json: () =>
         Promise.resolve({
-          error: { message: 'Invalid recipient' },
+          error: { message: "Invalid recipient" },
         }),
     };
     global.fetch = vi.fn().mockResolvedValue(mockError);
 
     await expect(
-      client.sendEmail('fake-token', {
-        to: 'invalid-email',
-        subject: 'Test',
-        body: 'Hello',
-      })
-    ).rejects.toThrow('Microsoft Graph API error: 400 - Invalid recipient');
+      client.sendEmail("fake-token", {
+        to: "invalid-email",
+        subject: "Test",
+        body: "Hello",
+      }),
+    ).rejects.toThrow("Microsoft Graph API error: 400 - Invalid recipient");
   });
 });
 ```
@@ -411,18 +414,18 @@ This integration test validates the complete OAuth authorization flow from clien
 
 ```typescript
 // tests/integration/oauth-flow.test.ts
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from "vitest";
 
-describe('OAuth Integration', () => {
-  const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:8787';
+describe("OAuth Integration", () => {
+  const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:8787";
 
-  it('should complete full OAuth flow', async () => {
+  it("should complete full OAuth flow", async () => {
     // 1. Register client
     const registerResponse = await fetch(`${BASE_URL}/register`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({
-        client_name: 'Integration Test Client',
-        redirect_uris: ['http://localhost:3000/callback'],
+        client_name: "Integration Test Client",
+        redirect_uris: ["http://localhost:3000/callback"],
       }),
     });
 
@@ -458,14 +461,14 @@ This k6 script simulates realistic user behavior with gradual traffic ramp-up an
 
 ```javascript
 // tests/load/basic-load.js
-import http from 'k6/http';
-import { check, sleep } from 'k6';
+import http from "k6/http";
+import { check, sleep } from "k6";
 
 export let options = {
   stages: [
-    { duration: '2m', target: 10 }, // Ramp up
-    { duration: '5m', target: 50 }, // Stay at 50 users
-    { duration: '2m', target: 0 }, // Ramp down
+    { duration: "2m", target: 10 }, // Ramp up
+    { duration: "5m", target: 50 }, // Stay at 50 users
+    { duration: "2m", target: 0 }, // Ramp down
   ],
 };
 
@@ -474,19 +477,19 @@ export default function () {
   let response = http.post(
     `${__ENV.BASE_URL}/sse`,
     JSON.stringify({
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id: 1,
-      method: 'tools/list',
+      method: "tools/list",
       params: {},
     }),
     {
-      headers: { 'Content-Type': 'application/json' },
-    }
+      headers: { "Content-Type": "application/json" },
+    },
   );
 
   check(response, {
-    'tool discovery succeeds': r => r.status === 200,
-    'response time < 500ms': r => r.timings.duration < 500,
+    "tool discovery succeeds": (r) => r.status === 200,
+    "response time < 500ms": (r) => r.timings.duration < 500,
   });
 
   sleep(1);
@@ -515,7 +518,12 @@ export class MicrosoftGraphClient {
       property2: params.param2 || 0,
     };
 
-    const response = await this.makeGraphRequest(accessToken, url, 'POST', body);
+    const response = await this.makeGraphRequest(
+      accessToken,
+      url,
+      "POST",
+      body,
+    );
     return response;
   }
 }
@@ -565,30 +573,30 @@ Create comprehensive unit tests for the new tool including success cases, error 
 
 ```typescript
 // tests/unit/new-tool.test.ts
-describe('newTool', () => {
-  it('should execute newTool successfully', async () => {
-    const mockResponse = { id: 'new-item-id', status: 'created' };
+describe("newTool", () => {
+  it("should execute newTool successfully", async () => {
+    const mockResponse = { id: "new-item-id", status: "created" };
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: () => Promise.resolve(mockResponse),
     });
 
-    const result = await client.newTool('fake-token', {
-      param1: 'test-value',
+    const result = await client.newTool("fake-token", {
+      param1: "test-value",
       param2: 42,
     });
 
     expect(result).toEqual(mockResponse);
     expect(fetch).toHaveBeenCalledWith(
-      'https://graph.microsoft.com/v1.0/me/newEndpoint',
+      "https://graph.microsoft.com/v1.0/me/newEndpoint",
       expect.objectContaining({
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify({
-          property1: 'test-value',
+          property1: "test-value",
           property2: 42,
         }),
-      })
+      }),
     );
   });
 });
@@ -661,21 +669,24 @@ async init() {
 async function handleHybridMcp(
   request: Request,
   env: Env,
-  ctx: ExecutionContext
+  ctx: ExecutionContext,
 ): Promise<Response> {
   // ... existing protocol detection
 
   // Add new protocol detection
-  if (request.headers.get('X-Custom-Protocol') === 'new-protocol') {
+  if (request.headers.get("X-Custom-Protocol") === "new-protocol") {
     return handleNewProtocol(request, env);
   }
 
   // ... rest of handler
 }
 
-async function handleNewProtocol(request: Request, env: Env): Promise<Response> {
+async function handleNewProtocol(
+  request: Request,
+  env: Env,
+): Promise<Response> {
   // Implement new protocol handling
-  return new Response('New protocol handler', { status: 200 });
+  return new Response("New protocol handler", { status: 200 });
 }
 ```
 
@@ -708,7 +719,7 @@ The TypeScript compiler configuration enforces strict type checking and modern J
 
 ```typescript
 // Use camelCase for functions and variables
-const accessToken = 'token';
+const accessToken = "token";
 async function sendEmail() {}
 
 // Use PascalCase for classes and types
@@ -732,25 +743,33 @@ Standard function organization pattern with JSDoc comments, input validation, er
  * @returns Promise resolving to the API response
  * @throws {Error} When API request fails or token is invalid
  */
-async function sendEmail(accessToken: string, params: EmailParams): Promise<any> {
+async function sendEmail(
+  accessToken: string,
+  params: EmailParams,
+): Promise<any> {
   // Validate inputs first
   if (!accessToken) {
-    throw new Error('Access token is required');
+    throw new Error("Access token is required");
   }
 
   if (!params.to || !params.subject || !params.body) {
-    throw new Error('Missing required email parameters');
+    throw new Error("Missing required email parameters");
   }
 
   try {
     // Main logic
-    const response = await this.makeGraphRequest(accessToken, url, 'POST', body);
+    const response = await this.makeGraphRequest(
+      accessToken,
+      url,
+      "POST",
+      body,
+    );
     return response;
   } catch (error) {
     // Always provide meaningful error context
-    console.error('Failed to send email:', error);
+    console.error("Failed to send email:", error);
     throw new Error(
-      `Email sending failed: ${error instanceof Error ? error.message : String(error)}`
+      `Email sending failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -794,10 +813,10 @@ interface ToolResult {
 // Use type guards for runtime validation
 function isEmailParams(obj: any): obj is EmailParams {
   return (
-    typeof obj === 'object' &&
-    typeof obj.to === 'string' &&
-    typeof obj.subject === 'string' &&
-    typeof obj.body === 'string'
+    typeof obj === "object" &&
+    typeof obj.to === "string" &&
+    typeof obj.subject === "string" &&
+    typeof obj.body === "string"
   );
 }
 ```
@@ -851,16 +870,16 @@ Structured logging approach for development debugging that provides clear visibi
 
 ```typescript
 // Use structured logging
-console.log('=== PROTOCOL DETECTION ===');
-console.log('Method:', request.method);
-console.log('Headers:', Object.fromEntries(request.headers.entries()));
-console.log('URL:', request.url);
+console.log("=== PROTOCOL DETECTION ===");
+console.log("Method:", request.method);
+console.log("Headers:", Object.fromEntries(request.headers.entries()));
+console.log("URL:", request.url);
 
 // Debug tool execution
-console.log('=== TOOL EXECUTION ===');
-console.log('Tool name:', toolName);
-console.log('Arguments:', JSON.stringify(args, null, 2));
-console.log('Access token present:', !!accessToken);
+console.log("=== TOOL EXECUTION ===");
+console.log("Tool name:", toolName);
+console.log("Arguments:", JSON.stringify(args, null, 2));
+console.log("Access token present:", !!accessToken);
 ```
 
 **3. KV Storage Debugging:**
@@ -876,7 +895,7 @@ async function debugKV(env: Env, namespace: string, key: string) {
 }
 
 // Usage in handlers
-await debugKV(env, 'OAUTH_KV', `client:${clientId}`);
+await debugKV(env, "OAUTH_KV", `client:${clientId}`);
 ```
 
 ### Production Debugging
@@ -906,7 +925,7 @@ function logError(error: any, context: string, metadata?: any) {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
       metadata,
-    })
+    }),
   );
 }
 
@@ -914,7 +933,7 @@ function logError(error: any, context: string, metadata?: any) {
 try {
   await sendEmail(token, params);
 } catch (error) {
-  logError(error, 'sendEmail', { userId, emailParams: params });
+  logError(error, "sendEmail", { userId, emailParams: params });
   throw error;
 }
 ```
@@ -923,7 +942,10 @@ try {
 
 ```typescript
 // Add timing measurements
-async function timedOperation<T>(name: string, operation: () => Promise<T>): Promise<T> {
+async function timedOperation<T>(
+  name: string,
+  operation: () => Promise<T>,
+): Promise<T> {
   const start = Date.now();
   try {
     const result = await operation();
@@ -936,7 +958,9 @@ async function timedOperation<T>(name: string, operation: () => Promise<T>): Pro
 }
 
 // Usage
-const emails = await timedOperation('getEmails', () => graphClient.getEmails(token, { count: 10 }));
+const emails = await timedOperation("getEmails", () =>
+  graphClient.getEmails(token, { count: 10 }),
+);
 ```
 
 ### Common Issues and Solutions
@@ -945,16 +969,17 @@ const emails = await timedOperation('getEmails', () => graphClient.getEmails(tok
 
 ```typescript
 // Debug WebSocket upgrade detection
-console.log('=== WEBSOCKET DEBUG ===');
-console.log('Upgrade header:', request.headers.get('Upgrade'));
-console.log('Connection header:', request.headers.get('Connection'));
-console.log('WebSocket-Key:', request.headers.get('Sec-WebSocket-Key'));
-console.log('WebSocket-Version:', request.headers.get('Sec-WebSocket-Version'));
+console.log("=== WEBSOCKET DEBUG ===");
+console.log("Upgrade header:", request.headers.get("Upgrade"));
+console.log("Connection header:", request.headers.get("Connection"));
+console.log("WebSocket-Key:", request.headers.get("Sec-WebSocket-Key"));
+console.log("WebSocket-Version:", request.headers.get("Sec-WebSocket-Version"));
 
 // Solution: Check all WebSocket signals
 const isWebSocketRequest =
-  request.headers.get('Upgrade')?.toLowerCase() === 'websocket' ||
-  (request.headers.get('Sec-WebSocket-Key') && request.headers.get('Sec-WebSocket-Version'));
+  request.headers.get("Upgrade")?.toLowerCase() === "websocket" ||
+  (request.headers.get("Sec-WebSocket-Key") &&
+    request.headers.get("Sec-WebSocket-Version"));
 ```
 
 **Issue: Microsoft Graph 204 responses causing JSON parsing errors**
@@ -962,22 +987,25 @@ const isWebSocketRequest =
 ```typescript
 // Debug response parsing
 async function debugGraphResponse(response: Response) {
-  console.log('Response status:', response.status);
-  console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+  console.log("Response status:", response.status);
+  console.log(
+    "Response headers:",
+    Object.fromEntries(response.headers.entries()),
+  );
 
-  const contentType = response.headers.get('content-type');
-  const contentLength = response.headers.get('content-length');
+  const contentType = response.headers.get("content-type");
+  const contentLength = response.headers.get("content-length");
 
-  console.log('Content-Type:', contentType);
-  console.log('Content-Length:', contentLength);
+  console.log("Content-Type:", contentType);
+  console.log("Content-Length:", contentLength);
 
-  if (response.status === 204 || contentLength === '0') {
-    console.log('Empty response - returning {}');
+  if (response.status === 204 || contentLength === "0") {
+    console.log("Empty response - returning {}");
     return {};
   }
 
   const text = await response.text();
-  console.log('Response body:', text);
+  console.log("Response body:", text);
 
   return text ? JSON.parse(text) : {};
 }
@@ -1130,6 +1158,7 @@ _This development guide provides comprehensive information for contributing to a
 ---
 
 ## Part II: Deployment Operations
+
 - [Monitoring & Operations](#monitoring--operations)
 - [Troubleshooting](#troubleshooting)
 - [Maintenance Procedures](#maintenance-procedures)
@@ -1529,14 +1558,14 @@ Regular performance benchmarking establishes baseline metrics and identifies per
 
 ```javascript
 // load-test.js
-import http from 'k6/http';
-import { check } from 'k6';
+import http from "k6/http";
+import { check } from "k6";
 
 export let options = {
   stages: [
-    { duration: '2m', target: 10 },
-    { duration: '5m', target: 50 },
-    { duration: '2m', target: 0 },
+    { duration: "2m", target: 10 },
+    { duration: "5m", target: 50 },
+    { duration: "2m", target: 0 },
   ],
 };
 
@@ -1544,17 +1573,17 @@ export default function () {
   let response = http.post(
     `${__ENV.WORKER_URL}/sse`,
     JSON.stringify({
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id: 1,
-      method: 'tools/list',
+      method: "tools/list",
       params: {},
     }),
-    { headers: { 'Content-Type': 'application/json' } }
+    { headers: { "Content-Type": "application/json" } },
   );
 
   check(response, {
-    'status is 200': r => r.status === 200,
-    'response time < 500ms': r => r.timings.duration < 500,
+    "status is 200": (r) => r.status === 200,
+    "response time < 500ms": (r) => r.timings.duration < 500,
   });
 }
 ```
@@ -1798,8 +1827,8 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
         with:
-          node-version: '18'
-          cache: 'npm'
+          node-version: "18"
+          cache: "npm"
       - run: npm ci
       - run: npm run type-check
       - run: npm run lint
@@ -1816,7 +1845,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: "18"
       - run: npm ci
       - uses: cloudflare/wrangler-action@v3
         with:
@@ -1872,24 +1901,28 @@ Regular maintenance ensures system reliability, security, and performance over t
 #### Regular Maintenance Checklist
 
 **Daily Tasks:**
+
 - [ ] Monitor error rates in Cloudflare Analytics
 - [ ] Check API response times
 - [ ] Review rate limiting metrics
 - [ ] Verify OAuth token refresh success rate
 
 **Weekly Tasks:**
+
 - [ ] Review security logs for anomalies
 - [ ] Check KV storage usage
 - [ ] Analyze performance metrics
 - [ ] Update dependencies (patch versions)
 
 **Monthly Tasks:**
+
 - [ ] Rotate API keys if needed
 - [ ] Review and update documentation
 - [ ] Performance baseline testing
 - [ ] Security audit
 
 **Quarterly Tasks:**
+
 - [ ] Update dependencies (minor/major versions)
 - [ ] Review Microsoft Graph API changes
 - [ ] Update OAuth scopes if needed
@@ -1900,6 +1933,7 @@ Regular maintenance ensures system reliability, security, and performance over t
 Token rotation is a critical security practice that limits the impact of potential credential compromise. Regular rotation ensures that even if credentials are exposed, their validity window is limited, reducing the risk of unauthorized access.
 
 **Microsoft Client Secret:**
+
 - **Expiration**: 24 months from creation
 - **Rotation Procedure**:
   1. Create new client secret in Azure Portal
@@ -1909,6 +1943,7 @@ Token rotation is a critical security practice that limits the impact of potenti
   5. Remove old secret from Azure Portal after 24 hours
 
 **Encryption Keys:**
+
 - **Rotation**: Annually or on security incident
 - **Procedure**:
   1. Generate new key: `openssl rand -hex 32`
@@ -1945,6 +1980,7 @@ npm audit fix
 Tracking these metrics provides insights into system health, usage patterns, and potential issues. Regular monitoring enables proactive optimization and early detection of problems before they impact users.
 
 #### OAuth Flow Metrics
+
 - **Authorization success rate**: Target >95%
 - **Token refresh frequency**: Monitor for anomalies
 - **Average token TTL**: Should be ~3600s
@@ -1956,6 +1992,7 @@ wrangler tail --format json | jq '. | select(.outcome == "ok") | .logs[] | selec
 ```
 
 #### MCP Protocol Metrics
+
 - **Tools invocation frequency**: Identify most-used tools
 - **Error rates by tool type**: Focus optimization efforts
 - **Discovery vs authenticated requests ratio**: Should be <10% discovery
@@ -1967,6 +2004,7 @@ wrangler tail --format json | jq '. | select(.logs[] | contains("tool:")) | .log
 ```
 
 #### Microsoft Graph API Metrics
+
 - **API call latency by endpoint**: Monitor p50, p95, p99
 - **Rate limit encounters (429 responses)**: Should be <1%
 - **Permission denied errors (403 responses)**: Indicates scope issues
@@ -1983,14 +2021,14 @@ Proactive alerting ensures rapid response to issues before they escalate. These 
 
 Configure alerts for critical conditions:
 
-| Metric | Warning | Critical | Action |
-|--------|---------|----------|--------|
-| Token refresh failures | >5% | >10% | Check Microsoft service health |
-| Graph API 429 responses | >10/min | >50/min | Implement request throttling |
-| Durable Object evictions | >0 | >10/min | Scale to multiple DOs |
-| OAuth authorization failures | >10% | >25% | Review client configuration |
-| Average response time | >1s | >3s | Optimize slow endpoints |
-| Error rate | >1% | >5% | Check logs for root cause |
+| Metric                       | Warning | Critical | Action                         |
+| ---------------------------- | ------- | -------- | ------------------------------ |
+| Token refresh failures       | >5%     | >10%     | Check Microsoft service health |
+| Graph API 429 responses      | >10/min | >50/min  | Implement request throttling   |
+| Durable Object evictions     | >0      | >10/min  | Scale to multiple DOs          |
+| OAuth authorization failures | >10%    | >25%     | Review client configuration    |
+| Average response time        | >1s     | >3s      | Optimize slow endpoints        |
+| Error rate                   | >1%     | >5%      | Check logs for root cause      |
 
 ### Real-time Monitoring Setup
 
@@ -2028,13 +2066,13 @@ Create monitoring dashboard using Grafana or Datadog:
 panels:
   - title: "OAuth Success Rate"
     query: "sum(rate(oauth_success[5m])) / sum(rate(oauth_attempts[5m]))"
-    
+
   - title: "Tool Usage Heatmap"
     query: "sum by(tool) (rate(mcp_tool_invocations[5m]))"
-    
+
   - title: "Graph API Latency"
     query: "histogram_quantile(0.95, rate(graph_api_latency_bucket[5m]))"
-    
+
   - title: "Error Rate by Type"
     query: "sum by(error_type) (rate(errors_total[5m]))"
 ```
@@ -2052,19 +2090,19 @@ async function healthCheck() {
     oauth: await checkOAuthEndpoint(),
     discovery: await checkDiscovery(),
     graphApi: await checkGraphConnection(),
-    durableObjects: await checkDurableObjects()
+    durableObjects: await checkDurableObjects(),
   };
-  
-  const healthy = Object.values(checks).every(c => c.status === 'ok');
+
+  const healthy = Object.values(checks).every((c) => c.status === "ok");
   return {
     healthy,
     checks,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   };
 }
 
 // Schedule health checks every 5 minutes
-addEventListener('scheduled', event => {
+addEventListener("scheduled", (event) => {
   event.waitUntil(healthCheck());
 });
 ```
@@ -2100,13 +2138,13 @@ Monitor performance bottlenecks:
 
 ```javascript
 // Add performance markers
-performance.mark('graph-api-start');
+performance.mark("graph-api-start");
 const result = await graphClient.getEmails(token, params);
-performance.mark('graph-api-end');
-performance.measure('graph-api-call', 'graph-api-start', 'graph-api-end');
+performance.mark("graph-api-end");
+performance.measure("graph-api-call", "graph-api-start", "graph-api-end");
 
 // Log performance metrics
-const measure = performance.getEntriesByName('graph-api-call')[0];
+const measure = performance.getEntriesByName("graph-api-call")[0];
 console.log(`Graph API call took ${measure.duration}ms`);
 ```
 
@@ -2141,3 +2179,4 @@ scenarios:
             id: 1
             method: "tools/list"
             params: {}
+```

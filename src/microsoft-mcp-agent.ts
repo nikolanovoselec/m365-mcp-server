@@ -1,27 +1,27 @@
 /**
  * Microsoft 365 MCP Agent - Durable Object implementation for MCP protocol
- * 
+ *
  * ARCHITECTURAL DESIGN:
  * - Extends McpAgent from Cloudflare agents library (required for MCP support)
  * - Durable Objects provide session persistence across requests
  * - Static serveSSE() method required due to HTTP/2 WebSocket limitations
- * 
+ *
  * TOKEN ARCHITECTURE:
  * - Props populated by OAuth Provider after successful authentication
  * - Contains Microsoft Graph access tokens for API calls
  * - Empty props are INTENTIONAL - signals unauthenticated discovery phase
  */
 
-import { McpAgent } from 'agents/mcp';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { z } from 'zod';
-import { MicrosoftGraphClient } from './microsoft-graph';
-import { Env } from './index';
+import { McpAgent } from "agents/mcp";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+import { MicrosoftGraphClient } from "./microsoft-graph";
+import { Env } from "./index";
 
 /**
  * OAuth context props passed from OAuth Provider via ExecutionContext
- * 
+ *
  * STATE MANAGEMENT:
  * - Populated: User authenticated, Graph API calls enabled
  * - Empty: Discovery phase, only tools/list available
@@ -46,21 +46,21 @@ interface State {
 
 /**
  * Microsoft 365 MCP Agent - Durable Object for persistent MCP sessions
- * 
+ *
  * Extends McpAgent from Cloudflare agents library to provide:
  * - MCP protocol compliance for AI assistants
  * - Microsoft Graph API integration for Office 365
  * - Session persistence via Durable Objects
  * - Automatic token refresh through OAuth Provider
- * 
+ *
  * @class MicrosoftMCPAgent
  * @extends McpAgent
  */
 export class MicrosoftMCPAgent extends McpAgent<Env, State, Props> {
   /** MCP Server instance for handling Model Context Protocol requests */
   server = new McpServer({
-    name: 'microsoft-365-mcp',
-    version: '0.0.3',
+    name: "microsoft-365-mcp",
+    version: "0.0.3",
   });
 
   /** Default Durable Object state tracking session activity */
@@ -72,7 +72,7 @@ export class MicrosoftMCPAgent extends McpAgent<Env, State, Props> {
 
   /**
    * Initializes Microsoft 365 MCP Agent with Durable Object state
-   * 
+   *
    * @param ctx - Durable Object state for session persistence
    * @param env - Cloudflare Worker environment bindings
    */
@@ -86,10 +86,10 @@ export class MicrosoftMCPAgent extends McpAgent<Env, State, Props> {
 
   /**
    * Generates standard authentication error response for unauthenticated tool calls
-   * 
+   *
    * Used when Microsoft Graph tokens are missing or expired.
    * Provides user-friendly guidance for completing OAuth flow.
-   * 
+   *
    * @returns CallToolResult with authentication guidance message
    * @private
    */
@@ -97,8 +97,8 @@ export class MicrosoftMCPAgent extends McpAgent<Env, State, Props> {
     return {
       content: [
         {
-          type: 'text',
-          text: 'Microsoft 365 authentication required. Please ensure you have completed the OAuth flow and have a valid access token.',
+          type: "text",
+          text: "Microsoft 365 authentication required. Please ensure you have completed the OAuth flow and have a valid access token.",
         },
       ],
       isError: true,
@@ -107,36 +107,38 @@ export class MicrosoftMCPAgent extends McpAgent<Env, State, Props> {
 
   /**
    * Initializes MCP server and registers all available tools
-   * 
+   *
    * CRITICAL: Tool registration MUST occur in init()
-   * 
+   *
    * MCP Protocol Requirements:
    * 1. Client calls initialize → tools/list in sequence
    * 2. Tools must be registered before discovery
    * 3. Empty props during init is EXPECTED (unauthenticated discovery)
-   * 
+   *
    * WHY THIS MATTERS:
    * MCP clients need to discover available tools before authentication.
    * This allows AI assistants to show capabilities and request appropriate
    * permissions from users before accessing Microsoft 365 data.
-   * 
+   *
    * DO NOT move tool registration elsewhere - breaks MCP discovery
-   * 
+   *
    * @override
    */
   async init() {
-    
     // ============================================================================
     // EMAIL TOOLS - Microsoft Outlook Integration
     // ============================================================================
     this.server.tool(
-      'sendEmail',
-      'Send an email via Outlook',
+      "sendEmail",
+      "Send an email via Outlook",
       {
-        to: z.string().describe('Recipient email address'),
-        subject: z.string().describe('Email subject'),
-        body: z.string().describe('Email body content'),
-        contentType: z.enum(['text', 'html']).default('html').describe('Content type'),
+        to: z.string().describe("Recipient email address"),
+        subject: z.string().describe("Email subject"),
+        body: z.string().describe("Email body content"),
+        contentType: z
+          .enum(["text", "html"])
+          .default("html")
+          .describe("Content type"),
       },
       async (args): Promise<CallToolResult> => {
         const accessToken = this.props?.microsoftAccessToken;
@@ -146,7 +148,11 @@ export class MicrosoftMCPAgent extends McpAgent<Env, State, Props> {
 
         try {
           await this.graphClient.sendEmail(accessToken, args);
-          return { content: [{ type: 'text', text: `Email sent successfully to ${args.to}` }] };
+          return {
+            content: [
+              { type: "text", text: `Email sent successfully to ${args.to}` },
+            ],
+          };
         } catch (error: any) {
           const errorMessage = error?.message || String(error);
           const contextualError = `Send Email Tool Error: ${errorMessage}
@@ -156,20 +162,20 @@ Requested: Send email to "${args.to}" with subject "${args.subject}"
 Troubleshooting: If you see permission errors, ensure the app registration has Mail.Send scope and the user has mailbox access.`;
 
           return {
-            content: [{ type: 'text', text: contextualError }],
+            content: [{ type: "text", text: contextualError }],
             isError: true,
           };
         }
-      }
+      },
     );
 
     /** Email retrieval - Microsoft 365 mailbox folder access */
     this.server.tool(
-      'getEmails',
-      'Get recent emails',
+      "getEmails",
+      "Get recent emails",
       {
-        count: z.number().max(50).default(10).describe('Number of emails'),
-        folder: z.string().default('inbox').describe('Mail folder'),
+        count: z.number().max(50).default(10).describe("Number of emails"),
+        folder: z.string().default("inbox").describe("Mail folder"),
       },
       async (args): Promise<CallToolResult> => {
         const accessToken = this.props?.microsoftAccessToken;
@@ -183,7 +189,9 @@ Troubleshooting: If you see permission errors, ensure the app registration has M
             folder: args.folder,
           });
 
-          return { content: [{ type: 'text', text: JSON.stringify(emails, null, 2) }] };
+          return {
+            content: [{ type: "text", text: JSON.stringify(emails, null, 2) }],
+          };
         } catch (error: any) {
           const errorMessage = error?.message || String(error);
           const contextualError = `Email Tool Error: ${errorMessage}
@@ -193,19 +201,19 @@ Requested: ${args.count} emails from "${args.folder}" folder
 Troubleshooting: If you see permission errors, ensure the app registration has Mail.Read scope.`;
 
           return {
-            content: [{ type: 'text', text: contextualError }],
+            content: [{ type: "text", text: contextualError }],
             isError: true,
           };
         }
-      }
+      },
     );
 
     this.server.tool(
-      'searchEmails',
-      'Search emails',
+      "searchEmails",
+      "Search emails",
       {
-        query: z.string().describe('Search query'),
-        count: z.number().max(50).default(10).describe('Number of results'),
+        query: z.string().describe("Search query"),
+        count: z.number().max(50).default(10).describe("Number of results"),
       },
       async (args): Promise<CallToolResult> => {
         const accessToken = this.props?.microsoftAccessToken;
@@ -218,7 +226,9 @@ Troubleshooting: If you see permission errors, ensure the app registration has M
             query: args.query,
             count: args.count,
           });
-          return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+          return {
+            content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+          };
         } catch (error: any) {
           const errorMessage = error?.message || String(error);
           const contextualError = `Search Emails Tool Error: ${errorMessage}
@@ -228,21 +238,21 @@ Requested: Search for "${args.query}" with ${args.count} results
 Troubleshooting: If you see permission errors, ensure the app registration has Mail.Read scope. For search syntax, use KQL (Keyword Query Language).`;
 
           return {
-            content: [{ type: 'text', text: contextualError }],
+            content: [{ type: "text", text: contextualError }],
             isError: true,
           };
         }
-      }
+      },
     );
 
     // ============================================================================
-    // CALENDAR TOOLS - Microsoft 365 Calendar Integration  
+    // CALENDAR TOOLS - Microsoft 365 Calendar Integration
     // ============================================================================
     this.server.tool(
-      'getCalendarEvents',
-      'Get calendar events',
+      "getCalendarEvents",
+      "Get calendar events",
       {
-        days: z.number().max(30).default(7).describe('Days ahead'),
+        days: z.number().max(30).default(7).describe("Days ahead"),
       },
       async (args): Promise<CallToolResult> => {
         const accessToken = this.props?.microsoftAccessToken;
@@ -254,7 +264,9 @@ Troubleshooting: If you see permission errors, ensure the app registration has M
           const events = await this.graphClient.getCalendarEvents(accessToken, {
             days: args.days,
           });
-          return { content: [{ type: 'text', text: JSON.stringify(events, null, 2) }] };
+          return {
+            content: [{ type: "text", text: JSON.stringify(events, null, 2) }],
+          };
         } catch (error: any) {
           const errorMessage = error?.message || String(error);
           const contextualError = `Get Calendar Events Tool Error: ${errorMessage}
@@ -264,22 +276,22 @@ Requested: ${args.days} days of upcoming calendar events
 Troubleshooting: If you see permission errors, ensure the app registration has Calendars.Read scope and the user has calendar access.`;
 
           return {
-            content: [{ type: 'text', text: contextualError }],
+            content: [{ type: "text", text: contextualError }],
             isError: true,
           };
         }
-      }
+      },
     );
 
     this.server.tool(
-      'createCalendarEvent',
-      'Create calendar event',
+      "createCalendarEvent",
+      "Create calendar event",
       {
-        subject: z.string().describe('Event title'),
-        start: z.string().describe('Start time (ISO 8601)'),
-        end: z.string().describe('End time (ISO 8601)'),
-        attendees: z.array(z.string()).optional().describe('Attendee emails'),
-        body: z.string().optional().describe('Event description'),
+        subject: z.string().describe("Event title"),
+        start: z.string().describe("Start time (ISO 8601)"),
+        end: z.string().describe("End time (ISO 8601)"),
+        attendees: z.array(z.string()).optional().describe("Attendee emails"),
+        body: z.string().optional().describe("Event description"),
       },
       async (args): Promise<CallToolResult> => {
         const accessToken = this.props?.microsoftAccessToken;
@@ -288,8 +300,13 @@ Troubleshooting: If you see permission errors, ensure the app registration has C
         }
 
         try {
-          const event = await this.graphClient.createCalendarEvent(accessToken, args);
-          return { content: [{ type: 'text', text: `Event created: ${event.id}` }] };
+          const event = await this.graphClient.createCalendarEvent(
+            accessToken,
+            args,
+          );
+          return {
+            content: [{ type: "text", text: `Event created: ${event.id}` }],
+          };
         } catch (error: any) {
           const errorMessage = error?.message || String(error);
           const contextualError = `Create Calendar Event Tool Error: ${errorMessage}
@@ -299,24 +316,24 @@ Requested: Create event "${args.subject}" from ${args.start} to ${args.end}
 Troubleshooting: If you see permission errors, ensure the app registration has Calendars.ReadWrite scope. Check that dates are in valid ISO 8601 format.`;
 
           return {
-            content: [{ type: 'text', text: contextualError }],
+            content: [{ type: "text", text: contextualError }],
             isError: true,
           };
         }
-      }
+      },
     );
 
-        // ============================================================================
+    // ============================================================================
     // TEAMS TOOLS - Microsoft Teams Integration
     // ============================================================================
-    
+
     this.server.tool(
-      'sendTeamsMessage',
-      'Send Teams message',
+      "sendTeamsMessage",
+      "Send Teams message",
       {
-        teamId: z.string().describe('Team ID'),
-        channelId: z.string().describe('Channel ID'),
-        message: z.string().describe('Message content'),
+        teamId: z.string().describe("Team ID"),
+        channelId: z.string().describe("Channel ID"),
+        message: z.string().describe("Message content"),
       },
       async (args): Promise<CallToolResult> => {
         const accessToken = this.props?.microsoftAccessToken;
@@ -326,7 +343,7 @@ Troubleshooting: If you see permission errors, ensure the app registration has C
 
         try {
           await this.graphClient.sendTeamsMessage(accessToken, args);
-          return { content: [{ type: 'text', text: 'Teams message sent' }] };
+          return { content: [{ type: "text", text: "Teams message sent" }] };
         } catch (error: any) {
           const errorMessage = error?.message || String(error);
           const contextualError = `Send Teams Message Tool Error: ${errorMessage}
@@ -336,21 +353,21 @@ Requested: Send message to team "${args.teamId}" in channel "${args.channelId}"
 Troubleshooting: If you see permission errors, ensure the app registration has ChannelMessage.Send scope and the user has access to the specified team/channel.`;
 
           return {
-            content: [{ type: 'text', text: contextualError }],
+            content: [{ type: "text", text: contextualError }],
             isError: true,
           };
         }
-      }
+      },
     );
 
     this.server.tool(
-      'createTeamsMeeting',
-      'Create Teams meeting',
+      "createTeamsMeeting",
+      "Create Teams meeting",
       {
-        subject: z.string().describe('Meeting title'),
-        startTime: z.string().describe('Start time (ISO 8601)'),
-        endTime: z.string().describe('End time (ISO 8601)'),
-        attendees: z.array(z.string()).optional().describe('Attendee emails'),
+        subject: z.string().describe("Meeting title"),
+        startTime: z.string().describe("Start time (ISO 8601)"),
+        endTime: z.string().describe("End time (ISO 8601)"),
+        attendees: z.array(z.string()).optional().describe("Attendee emails"),
       },
       async (args): Promise<CallToolResult> => {
         const accessToken = this.props?.microsoftAccessToken;
@@ -359,8 +376,15 @@ Troubleshooting: If you see permission errors, ensure the app registration has C
         }
 
         try {
-          const meeting = await this.graphClient.createTeamsMeeting(accessToken, args);
-          return { content: [{ type: 'text', text: `Meeting created: ${meeting.joinWebUrl}` }] };
+          const meeting = await this.graphClient.createTeamsMeeting(
+            accessToken,
+            args,
+          );
+          return {
+            content: [
+              { type: "text", text: `Meeting created: ${meeting.joinWebUrl}` },
+            ],
+          };
         } catch (error: any) {
           const errorMessage = error?.message || String(error);
           const contextualError = `Create Teams Meeting Tool Error: ${errorMessage}
@@ -370,24 +394,24 @@ Requested: Create meeting "${args.subject}" from ${args.startTime} to ${args.end
 Troubleshooting: If you see permission errors, ensure the app registration has OnlineMeetings.ReadWrite scope. Check that times are in valid ISO 8601 format.`;
 
           return {
-            content: [{ type: 'text', text: contextualError }],
+            content: [{ type: "text", text: contextualError }],
             isError: true,
           };
         }
-      }
+      },
     );
 
     /** Register contact management tools */
     // ============================================================================
     // CONTACT TOOLS - Microsoft 365 People API
     // ============================================================================
-    
+
     this.server.tool(
-      'getContacts',
-      'Get contacts',
+      "getContacts",
+      "Get contacts",
       {
-        count: z.number().max(100).default(50).describe('Number of contacts'),
-        search: z.string().optional().describe('Search term'),
+        count: z.number().max(100).default(50).describe("Number of contacts"),
+        search: z.string().optional().describe("Search term"),
       },
       async (args): Promise<CallToolResult> => {
         const accessToken = this.props?.microsoftAccessToken;
@@ -398,7 +422,7 @@ Troubleshooting: If you see permission errors, ensure the app registration has O
         try {
           // Debug: Decode the access token to see what scopes we actually have
           try {
-            const tokenParts = accessToken.split('.');
+            const tokenParts = accessToken.split(".");
             if (tokenParts.length >= 2) {
               const _payload = JSON.parse(atob(tokenParts[1]));
               /** Token payload contains scopes, roles, and audience for permission validation */
@@ -411,7 +435,11 @@ Troubleshooting: If you see permission errors, ensure the app registration has O
             count: args.count,
             search: args.search,
           });
-          return { content: [{ type: 'text', text: JSON.stringify(contacts, null, 2) }] };
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(contacts, null, 2) },
+            ],
+          };
         } catch (error: any) {
           const errorMessage = error?.message || String(error);
           const contextualError = `Contacts Tool Error: ${errorMessage}
@@ -420,11 +448,11 @@ Context: This tool retrieves contacts from Microsoft 365 using the /me/people en
 Troubleshooting: If you see permission errors, the Microsoft app registration may need additional scopes or admin consent.`;
 
           return {
-            content: [{ type: 'text', text: contextualError }],
+            content: [{ type: "text", text: contextualError }],
             isError: true,
           };
         }
-      }
+      },
     );
 
     /**
@@ -433,34 +461,34 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
      * Automatically exposed when props are empty (unauthenticated state)
      */
     this.server.tool(
-      'authenticate',
-      'Get authentication URL for Microsoft 365',
+      "authenticate",
+      "Get authentication URL for Microsoft 365",
       {},
       async (): Promise<CallToolResult> => {
         return {
           content: [
             {
-              type: 'text',
-              text: 'Authentication is handled automatically by the OAuth provider. If you are seeing this message, please check your OAuth client configuration and ensure you have completed the authorization flow properly.',
+              type: "text",
+              text: "Authentication is handled automatically by the OAuth provider. If you are seeing this message, please check your OAuth client configuration and ensure you have completed the authorization flow properly.",
             },
           ],
         };
-      }
+      },
     );
 
     /** Register MCP resources for user profile, calendars, and teams data access */
-    this.server.resource('profile', 'microsoft://profile', async () => {
+    this.server.resource("profile", "microsoft://profile", async () => {
       const accessToken = this.props?.microsoftAccessToken;
       if (!accessToken) {
         return {
           contents: [
             {
-              uri: 'microsoft://profile',
-              mimeType: 'application/json',
+              uri: "microsoft://profile",
+              mimeType: "application/json",
               text: JSON.stringify(
-                { error: 'Authentication required', authenticated: false },
+                { error: "Authentication required", authenticated: false },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -472,8 +500,8 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
         return {
           contents: [
             {
-              uri: 'microsoft://profile',
-              mimeType: 'application/json',
+              uri: "microsoft://profile",
+              mimeType: "application/json",
               text: JSON.stringify(profile, null, 2),
             },
           ],
@@ -482,12 +510,15 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
         return {
           contents: [
             {
-              uri: 'microsoft://profile',
-              mimeType: 'application/json',
+              uri: "microsoft://profile",
+              mimeType: "application/json",
               text: JSON.stringify(
-                { error: error.message || 'Failed to fetch profile', authenticated: true },
+                {
+                  error: error.message || "Failed to fetch profile",
+                  authenticated: true,
+                },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -498,19 +529,23 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
     // ============================================================================
     // MCP RESOURCES - Expose Microsoft 365 data as resources
     // ============================================================================
-    
-    this.server.resource('calendars', 'microsoft://calendars', async () => {
+
+    this.server.resource("calendars", "microsoft://calendars", async () => {
       const accessToken = this.props?.microsoftAccessToken;
       if (!accessToken) {
         return {
           contents: [
             {
-              uri: 'microsoft://calendars',
-              mimeType: 'application/json',
+              uri: "microsoft://calendars",
+              mimeType: "application/json",
               text: JSON.stringify(
-                { error: 'Authentication required', authenticated: false, calendars: [] },
+                {
+                  error: "Authentication required",
+                  authenticated: false,
+                  calendars: [],
+                },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -522,8 +557,8 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
         return {
           contents: [
             {
-              uri: 'microsoft://calendars',
-              mimeType: 'application/json',
+              uri: "microsoft://calendars",
+              mimeType: "application/json",
               text: JSON.stringify(calendars, null, 2),
             },
           ],
@@ -532,16 +567,16 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
         return {
           contents: [
             {
-              uri: 'microsoft://calendars',
-              mimeType: 'application/json',
+              uri: "microsoft://calendars",
+              mimeType: "application/json",
               text: JSON.stringify(
                 {
-                  error: error.message || 'Failed to fetch calendars',
+                  error: error.message || "Failed to fetch calendars",
                   authenticated: true,
                   calendars: [],
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -549,18 +584,22 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
       }
     });
 
-    this.server.resource('teams', 'microsoft://teams', async () => {
+    this.server.resource("teams", "microsoft://teams", async () => {
       const accessToken = this.props?.microsoftAccessToken;
       if (!accessToken) {
         return {
           contents: [
             {
-              uri: 'microsoft://teams',
-              mimeType: 'application/json',
+              uri: "microsoft://teams",
+              mimeType: "application/json",
               text: JSON.stringify(
-                { error: 'Authentication required', authenticated: false, teams: [] },
+                {
+                  error: "Authentication required",
+                  authenticated: false,
+                  teams: [],
+                },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -572,8 +611,8 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
         return {
           contents: [
             {
-              uri: 'microsoft://teams',
-              mimeType: 'application/json',
+              uri: "microsoft://teams",
+              mimeType: "application/json",
               text: JSON.stringify(teams, null, 2),
             },
           ],
@@ -582,12 +621,16 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
         return {
           contents: [
             {
-              uri: 'microsoft://teams',
-              mimeType: 'application/json',
+              uri: "microsoft://teams",
+              mimeType: "application/json",
               text: JSON.stringify(
-                { error: error.message || 'Failed to fetch teams', authenticated: true, teams: [] },
+                {
+                  error: error.message || "Failed to fetch teams",
+                  authenticated: true,
+                  teams: [],
+                },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -600,7 +643,7 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
 
   /**
    * Request handler override for MCP protocol compliance
-   * 
+   *
    * AUTHENTICATION BYPASS LOGIC:
    * - Discovery methods accessible without authentication (MCP requirement)
    * - Tool calls require Microsoft Graph tokens from OAuth props
@@ -609,7 +652,7 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
   async fetch(request: Request): Promise<Response> {
     const _requestId = Math.random().toString(36).substring(7);
 
-    const body = await request.clone().text()
+    const body = await request.clone().text();
 
     let jsonRpcRequest;
 
@@ -624,31 +667,37 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
 
     /**
      * MCP discovery methods - MUST be accessible without authentication
-     * 
+     *
      * WHY THESE ARE SPECIAL:
      * 1. 'initialize': Establishes MCP session and protocol version
      * 2. 'tools/list': Enumerates available tools for client UI
      * 3. 'resources/list': Lists available data resources
      * 4. 'prompts/list': Provides prompt templates (if any)
-     * 
+     *
      * These methods allow AI assistants to show capabilities before
      * requesting user authentication, enabling informed consent.
-     * 
+     *
      * DISCOVERY PHASE BEHAVIOR:
      * When props are empty/undefined, the agent operates in "discovery mode":
      * - Only tools/list and initialize methods are accessible
      * - All tool invocations return authentication required errors
      * - This allows MCP clients to enumerate capabilities before auth
      * - Session is ephemeral and not persisted to Durable Object storage
-     * 
+     *
      * DURABLE OBJECT STORAGE LIMITS:
      * - State storage: 128KB per Durable Object
      * - WebSocket connections: 32 concurrent per DO
      * - When limits are reached, oldest sessions are evicted
      * - Consider implementing session affinity for scale
      */
-    const discoveryMethods = ['initialize', 'tools/list', 'resources/list', 'prompts/list'];
-    const isDiscoveryMethod = jsonRpcRequest && discoveryMethods.includes(jsonRpcRequest.method);
+    const discoveryMethods = [
+      "initialize",
+      "tools/list",
+      "resources/list",
+      "prompts/list",
+    ];
+    const isDiscoveryMethod =
+      jsonRpcRequest && discoveryMethods.includes(jsonRpcRequest.method);
 
     if (isDiscoveryMethod) {
       /** Temporarily clear props to bypass authentication check */
@@ -666,55 +715,59 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
 
     /** Authenticated request processing - requires Microsoft tokens */
     if (jsonRpcRequest && jsonRpcRequest.method) {
-
-      if (jsonRpcRequest.method === 'tools/call' && jsonRpcRequest.params?.name) {
+      if (
+        jsonRpcRequest.method === "tools/call" &&
+        jsonRpcRequest.params?.name
+      ) {
         /** Tool execution delegated to registered handlers */
       }
 
-      if (jsonRpcRequest.method === 'tools/call') {
+      if (jsonRpcRequest.method === "tools/call") {
         const hasTokens = !!this.props?.microsoftAccessToken;
-        
-        if (!hasTokens && jsonRpcRequest.params?.name !== 'authenticate') {
+
+        if (!hasTokens && jsonRpcRequest.params?.name !== "authenticate") {
           /** Token validation handled by individual tool implementations */
         }
       }
     }
 
-    const mcpMode = request.headers.get('X-MCP-Mode');
-    const webSocketSession = request.headers.get('X-WebSocket-Session');
+    const mcpMode = request.headers.get("X-MCP-Mode");
+    const webSocketSession = request.headers.get("X-WebSocket-Session");
 
     /**
      * WebSocket upgrade handling (limited by HTTP/2 constraints)
-     * 
+     *
      * WEBSOCKET CONNECTION LIFECYCLE:
      * 1. Initial upgrade request validated here
      * 2. Durable Object hibernation API manages connection state
      * 3. Messages queued if connection temporarily lost
      * 4. Automatic reconnection within 60s timeout window
      * 5. After timeout, session terminated and state cleared
-     * 
+     *
      * RATE LIMITING:
      * - Messages: 1000/min per connection (enforced by DO)
      * - Connections: 32 concurrent per DO instance
      * - Bandwidth: 10MB/min per connection
      * - Exceeded limits result in connection termination
      */
-    if (mcpMode === 'websocket' && webSocketSession) {
-      const upgradeHeader = request.headers.get('Upgrade');
-      const webSocketKey = request.headers.get('Sec-WebSocket-Key');
+    if (mcpMode === "websocket" && webSocketSession) {
+      const upgradeHeader = request.headers.get("Upgrade");
+      const webSocketKey = request.headers.get("Sec-WebSocket-Key");
 
-      if (upgradeHeader?.toLowerCase() === 'websocket' && webSocketKey) {
+      if (upgradeHeader?.toLowerCase() === "websocket" && webSocketKey) {
         try {
           /** Parent McpAgent handles WebSocket protocol */
           return await super.fetch(request);
         } catch (error) {
-          return new Response(`WebSocket delegation error: ${error}`, { status: 500 });
+          return new Response(`WebSocket delegation error: ${error}`, {
+            status: 500,
+          });
         }
       }
     }
 
     /** Handshake mode - authentication bypass for initial connection */
-    if (mcpMode === 'handshake' || mcpMode === 'other') {
+    if (mcpMode === "handshake" || mcpMode === "other") {
       /** Clear props for unauthenticated handshake */
       const originalProps = this.props;
       (this as any).props = null;
@@ -740,17 +793,17 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
    * Required for WebSocket handshake validation
    */
   private async generateWebSocketAccept(webSocketKey: string): Promise<string> {
-    const webSocketMagicString = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+    const webSocketMagicString = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     const concatenated = webSocketKey + webSocketMagicString;
 
     /** Hash with SHA-1 and encode as base64 per WebSocket protocol requirements */
     const encoder = new TextEncoder();
     const data = encoder.encode(concatenated);
-    const hashBuffer = await crypto.subtle.digest('SHA-1', data);
+    const hashBuffer = await crypto.subtle.digest("SHA-1", data);
     const hashArray = new Uint8Array(hashBuffer);
 
     // Convert to base64
-    let binary = '';
+    let binary = "";
     for (let i = 0; i < hashArray.length; i++) {
       binary += String.fromCharCode(hashArray[i]);
     }
@@ -759,10 +812,10 @@ Troubleshooting: If you see permission errors, the Microsoft app registration ma
 
   /**
    * Durable Object state change handler
-   * 
+   *
    * Called when Durable Object state changes.
    * Currently unused but available for session tracking.
-   * 
+   *
    * @param state - Updated state object
    * @override
    */

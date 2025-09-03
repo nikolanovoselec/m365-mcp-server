@@ -38,13 +38,13 @@ graph TB
     Entry --> APIToken[API Token Detection]
     APIToken -->|Discovery Mode| DO1[Discovery DO]
     APIToken -->|OAuth Mode| OAuth[OAuth Provider]
-    
+
     OAuth --> SSE["SSE Endpoint (/sse)"]
     SSE --> DO2[Authenticated DO]
-    
+
     DO1 --> Graph[Microsoft Graph]
     DO2 --> Graph
-    
+
     OAuth --> KV1[OAUTH_KV]
     OAuth --> KV3[CONFIG_KV]
     DO2 --> KV2[CACHE_KV]
@@ -59,12 +59,12 @@ The server implements intelligent protocol detection that automatically routes r
 
 ```typescript
 // Real implementation from src/index.ts:124-130
-const upgradeHeader = request.headers.get('Upgrade');
-const webSocketKey = request.headers.get('Sec-WebSocket-Key');
-const webSocketVersion = request.headers.get('Sec-WebSocket-Version');
+const upgradeHeader = request.headers.get("Upgrade");
+const webSocketKey = request.headers.get("Sec-WebSocket-Key");
+const webSocketVersion = request.headers.get("Sec-WebSocket-Version");
 
 if (
-  (upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') ||
+  (upgradeHeader && upgradeHeader.toLowerCase() === "websocket") ||
   (webSocketKey && webSocketVersion)
 ) {
   // WebSocket upgrade - delegate to Durable Object
@@ -74,11 +74,14 @@ if (
   return stub.fetch(request);
 }
 
-if (request.method === 'GET' && request.headers.get('Accept')?.includes('text/event-stream')) {
+if (
+  request.method === "GET" &&
+  request.headers.get("Accept")?.includes("text/event-stream")
+) {
   return handleSSEConnection(request);
 }
 
-if (request.method === 'POST') {
+if (request.method === "POST") {
   return handleJSONRPC(request);
 }
 ```
@@ -105,9 +108,9 @@ The system detects WebSocket upgrade requests using multiple header signals beyo
 ```typescript
 // Multi-signal WebSocket detection
 const isWebSocketRequest =
-  upgradeHeader?.toLowerCase() === 'websocket' ||
+  upgradeHeader?.toLowerCase() === "websocket" ||
   (webSocketKey && webSocketVersion) ||
-  connectionHeader?.toLowerCase().includes('upgrade');
+  connectionHeader?.toLowerCase().includes("upgrade");
 
 if (isWebSocketRequest) {
   return await super.fetch(request); // Perfect delegation to MCP SDK
@@ -149,7 +152,7 @@ flowchart TB
         DO[Durable Objects]
         MS[Microsoft<br/>Entra ID]
         Graph[Graph API]
-        
+
         Client --> Worker
         Worker --> OAuth
         Worker --> DO
@@ -168,7 +171,7 @@ sequenceDiagram
     participant C as Client
     participant W as Worker
     participant DO as Durable Object
-    
+
     C->>W: 1. POST /sse + API Token
     W->>W: 2. Detect non-OAuth format
     W->>DO: 3. Route to discovery-session
@@ -184,7 +187,7 @@ sequenceDiagram
     participant C as Client
     participant W as Worker
     participant O as OAuth Provider
-    
+
     C->>W: 5. POST /register
     W->>O: Register client
     Note over O: 6. Store internally<br/>(not in OAUTH_KV)
@@ -201,22 +204,22 @@ sequenceDiagram
     participant W as Worker
     participant O as OAuth Provider
     participant MS as Microsoft Entra
-    
+
     C->>W: 8. GET /authorize + client_id
     W->>O: Check authorization
     O->>O: 9. Check approval cookie
-    
+
     alt First time user
         O-->>C: 10. Approval dialog HTML
         C->>W: 11. POST /authorize (approval)
         W->>O: Process approval
         O->>O: 12. Set approval cookie
     end
-    
+
     O-->>C: 13. Redirect to Microsoft
     C->>MS: 14. Login with M365 credentials
     MS-->>C: 15. Redirect with auth code
-    
+
     C->>W: 16. GET /callback + code + state
     W->>O: 17. Complete authorization
     Note over O: Store MS code in props
@@ -238,7 +241,7 @@ sequenceDiagram
     participant O as OAuth Provider
     participant DO as Durable Object
     participant G as Graph API
-    
+
     C->>W: 22. POST /sse + Bearer x:y:z
     W->>W: 23. Detect OAuth format (3-part)
     W->>O: Validate token
@@ -259,7 +262,7 @@ sequenceDiagram
     participant W as Worker
     participant O as OAuth Provider
     participant MS as Microsoft Entra
-    
+
     C->>W: 28. Request with expired token
     W->>O: Validate token
     O->>O: 29. Detect token expiry
@@ -281,14 +284,14 @@ graph LR
         T2[API Token<br/>Other formats]
         T3[Microsoft Token<br/>Bearer for Graph]
     end
-    
+
     subgraph "Token Lifecycle"
         L1[Access Token<br/>1 hour TTL]
         L2[Refresh Token<br/>90 days TTL]
         L3[Client Secret<br/>24 months]
         L4[Session<br/>DO lifetime]
     end
-    
+
     subgraph "Storage Layers"
         S1[OAuth Provider<br/>Internal mgmt]
         S2[Props<br/>MS tokens via context]
@@ -303,11 +306,15 @@ The system bridges Cloudflare OAuth provider tokens to Microsoft Graph tokens th
 
 ```typescript
 tokenExchangeCallback: async (options: any) => {
-  if (options.grantType === 'authorization_code') {
+  if (options.grantType === "authorization_code") {
     const microsoftAuthCode = options.props.microsoftAuthCode;
     const redirectUri = options.props.microsoftRedirectUri;
 
-    const microsoftTokens = await exchangeMicrosoftTokens(microsoftAuthCode, env, redirectUri);
+    const microsoftTokens = await exchangeMicrosoftTokens(
+      microsoftAuthCode,
+      env,
+      redirectUri,
+    );
 
     return {
       accessTokenProps: {
@@ -322,7 +329,7 @@ tokenExchangeCallback: async (options: any) => {
     };
   }
 
-  if (options.grantType === 'refresh_token') {
+  if (options.grantType === "refresh_token") {
     const refreshToken = options.props.microsoftRefreshToken;
     const microsoftTokens = await refreshMicrosoftTokens(refreshToken, env);
 
@@ -350,14 +357,14 @@ tokenExchangeCallback: async (options: any) => {
 Web applications can dynamically register as OAuth clients without manual configuration, receiving unique credentials on-demand. This enables any web-based MCP connector to authenticate users without pre-registration, using the OAuth 2.1 Dynamic Client Registration protocol.
 
 ```typescript
-const registerRequest = new Request('/register', {
-  method: 'POST',
+const registerRequest = new Request("/register", {
+  method: "POST",
   body: JSON.stringify({
-    client_name: 'Microsoft 365 MCP Static Client',
-    redirect_uris: ['https://your-application.com/api/mcp/auth_callback'],
-    grant_types: ['authorization_code'],
-    response_types: ['code'],
-    token_endpoint_auth_method: 'none',
+    client_name: "Microsoft 365 MCP Static Client",
+    redirect_uris: ["https://your-application.com/api/mcp/auth_callback"],
+    grant_types: ["authorization_code"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
   }),
 });
 ```
@@ -367,15 +374,17 @@ const registerRequest = new Request('/register', {
 The mcp-remote CLI tool expects a pre-configured static client ID, but the OAuth Provider uses dynamic registration. This mapping layer translates the static ID to the actual registered client ID stored in CONFIG_KV, maintaining backward compatibility while leveraging the dynamic registration system.
 
 ```typescript
-const MCP_CLIENT_ID = 'rWJu8WV42zC5pfGT';
+const MCP_CLIENT_ID = "rWJu8WV42zC5pfGT";
 
 // Client ID aliasing for backward compatibility
 async function handleAuthorizeWithClientMapping(request) {
-  const requestedClientId = url.searchParams.get('client_id');
-  const actualClientId = await env.CONFIG_KV.get(`static_client_actual:${MCP_CLIENT_ID}`);
+  const requestedClientId = url.searchParams.get("client_id");
+  const actualClientId = await env.CONFIG_KV.get(
+    `static_client_actual:${MCP_CLIENT_ID}`,
+  );
 
   const mappedUrl = new URL(request.url);
-  mappedUrl.searchParams.set('client_id', actualClientId);
+  mappedUrl.searchParams.set("client_id", actualClientId);
   return processOAuthRequest(mappedUrl);
 }
 ```
@@ -386,8 +395,14 @@ This pattern allows MCP clients to enumerate available tools and resources witho
 
 ```typescript
 // Allow unauthenticated access for MCP discovery methods
-const discoveryMethods = ['initialize', 'tools/list', 'resources/list', 'prompts/list'];
-const isDiscoveryMethod = jsonRpcRequest && discoveryMethods.includes(jsonRpcRequest.method);
+const discoveryMethods = [
+  "initialize",
+  "tools/list",
+  "resources/list",
+  "prompts/list",
+];
+const isDiscoveryMethod =
+  jsonRpcRequest && discoveryMethods.includes(jsonRpcRequest.method);
 
 if (isDiscoveryMethod) {
   // Temporarily clear props to bypass authentication
@@ -411,14 +426,16 @@ Provides a translation layer between MCP tool names and Microsoft Graph API endp
 
 ```typescript
 const toolEndpointMapping = {
-  sendEmail: 'POST https://graph.microsoft.com/v1.0/me/sendMail',
-  getEmails: 'GET https://graph.microsoft.com/v1.0/me/messages',
-  createCalendarEvent: 'POST https://graph.microsoft.com/v1.0/me/events',
-  getCalendarEvents: 'GET https://graph.microsoft.com/v1.0/me/events',
-  sendTeamsMessage: 'POST https://graph.microsoft.com/v1.0/teams/{id}/channels/{id}/messages',
-  createTeamsMeeting: 'POST https://graph.microsoft.com/v1.0/me/onlineMeetings',
-  getContacts: 'GET https://graph.microsoft.com/v1.0/me/contacts',
-  searchEmails: 'GET https://graph.microsoft.com/v1.0/me/messages?$search="query"',
+  sendEmail: "POST https://graph.microsoft.com/v1.0/me/sendMail",
+  getEmails: "GET https://graph.microsoft.com/v1.0/me/messages",
+  createCalendarEvent: "POST https://graph.microsoft.com/v1.0/me/events",
+  getCalendarEvents: "GET https://graph.microsoft.com/v1.0/me/events",
+  sendTeamsMessage:
+    "POST https://graph.microsoft.com/v1.0/teams/{id}/channels/{id}/messages",
+  createTeamsMeeting: "POST https://graph.microsoft.com/v1.0/me/onlineMeetings",
+  getContacts: "GET https://graph.microsoft.com/v1.0/me/contacts",
+  searchEmails:
+    'GET https://graph.microsoft.com/v1.0/me/messages?$search="query"',
 };
 ```
 
@@ -436,13 +453,13 @@ if (response.status === 204) {
   return {};
 }
 
-const contentLength = response.headers.get('content-length');
-if (contentLength === '0' || !contentLength) {
+const contentLength = response.headers.get("content-length");
+if (contentLength === "0" || !contentLength) {
   return {};
 }
 
-const contentType = response.headers.get('content-type');
-if (!contentType || !contentType.includes('application/json')) {
+const contentType = response.headers.get("content-type");
+if (!contentType || !contentType.includes("application/json")) {
   return {};
 }
 
@@ -464,11 +481,12 @@ async function refreshMicrosoftTokens(refreshToken: string, env: Env) {
     client_id: env.MICROSOFT_CLIENT_ID,
     client_secret: env.MICROSOFT_CLIENT_SECRET,
     refresh_token: refreshToken,
-    grant_type: 'refresh_token',
-    scope: 'User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.Read Calendars.ReadWrite...',
+    grant_type: "refresh_token",
+    scope:
+      "User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.Read Calendars.ReadWrite...",
   });
 
-  const response = await fetch(tokenUrl, { method: 'POST', body: params });
+  const response = await fetch(tokenUrl, { method: "POST", body: params });
   return response.json();
 }
 ```
@@ -481,17 +499,17 @@ Defines all Microsoft Graph API permissions required by the MCP server. These sc
 
 ```typescript
 const requiredScopes = [
-  'User.Read',
-  'Mail.Read',
-  'Mail.ReadWrite',
-  'Mail.Send',
-  'Calendars.Read',
-  'Calendars.ReadWrite',
-  'Contacts.ReadWrite',
-  'OnlineMeetings.ReadWrite',
-  'ChannelMessage.Send',
-  'Team.ReadBasic.All',
-  'offline_access',
+  "User.Read",
+  "Mail.Read",
+  "Mail.ReadWrite",
+  "Mail.Send",
+  "Calendars.Read",
+  "Calendars.ReadWrite",
+  "Contacts.ReadWrite",
+  "OnlineMeetings.ReadWrite",
+  "ChannelMessage.Send",
+  "Team.ReadBasic.All",
+  "offline_access",
 ];
 ```
 
@@ -506,8 +524,8 @@ The MicrosoftMCPAgent extends the base MCP Agent to handle Microsoft 365 operati
 ```typescript
 export class MicrosoftMCPAgent extends McpAgent<Env, State, Props> {
   server = new McpServer({
-    name: 'microsoft-365-mcp',
-    version: '0.0.3',
+    name: "microsoft-365-mcp",
+    version: "0.0.3",
   });
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -536,18 +554,23 @@ await env.OAUTH_KV.put(
   `client:${clientId}`,
   JSON.stringify({
     clientId,
-    clientName: 'Microsoft 365 MCP Client',
-    redirectUris: ['https://app.com/callback'],
-    tokenEndpointAuthMethod: 'none',
-    grantTypes: ['authorization_code', 'refresh_token'],
-    responseTypes: ['code'],
+    clientName: "Microsoft 365 MCP Client",
+    redirectUris: ["https://app.com/callback"],
+    tokenEndpointAuthMethod: "none",
+    grantTypes: ["authorization_code", "refresh_token"],
+    responseTypes: ["code"],
     createdAt: Date.now(),
-  })
+  }),
 );
 
 // Encrypted access tokens
-const encryptedTokens = await encryptTokens(microsoftTokens, env.ENCRYPTION_KEY);
-await env.OAUTH_KV.put(`tokens:${userId}`, encryptedTokens, { expirationTtl: 3600 });
+const encryptedTokens = await encryptTokens(
+  microsoftTokens,
+  env.ENCRYPTION_KEY,
+);
+await env.OAUTH_KV.put(`tokens:${userId}`, encryptedTokens, {
+  expirationTtl: 3600,
+});
 ```
 
 **CONFIG_KV Namespace - Static Configuration:**
@@ -556,16 +579,19 @@ Stores long-lived configuration data including client ID mappings for backward c
 
 ```typescript
 // Static client ID mappings for backward compatibility
-await env.CONFIG_KV.put(`static_client_actual:${MCP_CLIENT_ID}`, actualClientId);
+await env.CONFIG_KV.put(
+  `static_client_actual:${MCP_CLIENT_ID}`,
+  actualClientId,
+);
 
 // Feature flags and configuration
 await env.CONFIG_KV.put(
-  'feature_flags',
+  "feature_flags",
   JSON.stringify({
     enableCaching: true,
     maxEmailCount: 50,
     debugMode: false,
-  })
+  }),
 );
 ```
 
@@ -614,49 +640,51 @@ Leverages Cloudflare's global edge network to provide low-latency access from an
 
 ```typescript
 // Edge caching for static responses
-const cacheKey = new Request(url, { method: 'GET' });
+const cacheKey = new Request(url, { method: "GET" });
 const cache = caches.default;
 
 let response = await cache.match(cacheKey);
 if (!response) {
   response = await fetchFromMicrosoftGraph(request);
-  response.headers.set('Cache-Control', 'public, max-age=300');
+  response.headers.set("Cache-Control", "public, max-age=300");
   await cache.put(cacheKey, response.clone());
 }
 ```
 
 ## Cloudflare Architectural Problems & Solutions
 
-*This section documents architectural challenges encountered when implementing MCP (Model Context Protocol) on Cloudflare Workers platform. These issues required significant engineering workarounds and could benefit from platform-level improvements.*
+_This section documents architectural challenges encountered when implementing MCP (Model Context Protocol) on Cloudflare Workers platform. These issues required significant engineering workarounds and could benefit from platform-level improvements._
 
 ### 1. HTTP/2 WebSocket Header Stripping
 
-**Problem Description**: 
+**Problem Description**:
 Cloudflare Workers serves all content over HTTP/2 by default for performance reasons. However, WebSocket protocol upgrades are fundamentally incompatible with HTTP/2 multiplexing. The HTTP/2 specification (RFC 7540) doesn't support the `Connection: Upgrade` mechanism that WebSocket relies on. When a client sends WebSocket upgrade headers over HTTP/1.1, Cloudflare's edge proxy strips these headers during the HTTP/1.1 → HTTP/2 conversion, making WebSocket detection impossible using standard methods.
 
 **Technical Impact**:
+
 - Standard WebSocket detection (`Upgrade: websocket` header) fails silently
 - Client libraries expecting WebSocket support receive unexpected responses
 - MCP protocol's WebSocket transport becomes unavailable
 - Forces fallback to less efficient SSE (Server-Sent Events) transport
 
-**Current Workaround**: 
+**Current Workaround**:
 We implemented multi-signal detection that looks for WebSocket indicators beyond just the Upgrade header:
 
 ```typescript
 // Multiple detection signals for WebSocket requests
-const upgradeHeader = request.headers.get('Upgrade');
-const webSocketKey = request.headers.get('Sec-WebSocket-Key');
-const webSocketVersion = request.headers.get('Sec-WebSocket-Version');
-const connectionHeader = request.headers.get('Connection');
+const upgradeHeader = request.headers.get("Upgrade");
+const webSocketKey = request.headers.get("Sec-WebSocket-Key");
+const webSocketVersion = request.headers.get("Sec-WebSocket-Version");
+const connectionHeader = request.headers.get("Connection");
 
 const isWebSocketRequest =
-  upgradeHeader?.toLowerCase() === 'websocket' ||
+  upgradeHeader?.toLowerCase() === "websocket" ||
   (webSocketKey && webSocketVersion) ||
-  connectionHeader?.toLowerCase().includes('upgrade');
+  connectionHeader?.toLowerCase().includes("upgrade");
 ```
 
 **Suggested Platform Improvement**:
+
 1. Allow HTTP/1.1 preservation for specific routes (e.g., `/ws` endpoints)
 2. Provide native WebSocket detection API in Workers runtime
 3. Document HTTP/2 limitations clearly in Workers WebSocket documentation
@@ -668,24 +696,25 @@ const isWebSocketRequest =
 The `@cloudflare/workers-oauth-provider` library manages its own token lifecycle and format, creating JWTs with Cloudflare-specific claims. However, our MCP server needs actual Microsoft Graph API access tokens to make Office 365 API calls. The OAuth provider's token format is incompatible with Microsoft's bearer token requirements, and there's no built-in mechanism to store or pass external provider tokens through the OAuth flow.
 
 **Technical Impact**:
+
 - Cannot directly use OAuth provider's access tokens for Microsoft API calls
 - Need dual token management (Cloudflare session tokens + Microsoft API tokens)
 - Token refresh logic must handle both token types independently
 - Increased complexity in token storage and retrieval
 
-**Current Workaround**: 
+**Current Workaround**:
 We implemented a token exchange callback that intercepts the OAuth flow and stores Microsoft tokens alongside Cloudflare's:
 
 ```typescript
 tokenExchangeCallback: async (options: any) => {
-  if (options.grantType === 'authorization_code') {
+  if (options.grantType === "authorization_code") {
     // Exchange OAuth provider authorization code for Microsoft tokens
     const microsoftTokens = await exchangeMicrosoftTokens(
-      options.props.microsoftAuthCode, 
-      env, 
-      options.props.microsoftRedirectUri
+      options.props.microsoftAuthCode,
+      env,
+      options.props.microsoftRedirectUri,
     );
-    
+
     return {
       accessTokenProps: {
         microsoftAccessToken: microsoftTokens.access_token,
@@ -698,10 +727,11 @@ tokenExchangeCallback: async (options: any) => {
       accessTokenTTL: microsoftTokens.expires_in,
     };
   }
-}
+};
 ```
 
 **Suggested Platform Improvement**:
+
 1. Allow OAuth provider to store arbitrary token metadata
 2. Support pluggable token storage backends
 3. Provide hooks for external token validation
@@ -713,35 +743,37 @@ tokenExchangeCallback: async (options: any) => {
 Cloudflare's ExecutionContext is designed for lifecycle management (waitUntil, passThroughOnException) but doesn't provide a standard way to pass application-specific context to Durable Objects. The OAuth provider stores authenticated user properties in ExecutionContext as `ctx.props`, but Durable Objects can't directly access these props. This creates a complex props extraction and injection pattern that's error-prone and difficult to debug.
 
 **Technical Impact**:
+
 - Props must be manually extracted from ExecutionContext and re-injected
 - Type safety is lost during props passing
 - Debugging props flow requires multiple inspection points
 - Props can be accidentally dropped or overwritten
 
-**Current Workaround**: 
+**Current Workaround**:
 We manually inject props at the routing layer before Durable Object invocation:
 
 ```typescript
 // Manual props injection for SSE endpoint
-if (request.url.endsWith('/sse')) {
-  const oauthProps = (ctx as any).props;  // Extract from ExecutionContext
-  
+if (request.url.endsWith("/sse")) {
+  const oauthProps = (ctx as any).props; // Extract from ExecutionContext
+
   // Create new context with props for Durable Object
   const propsContext = {
     ...ctx,
     props: oauthProps,
   };
-  
+
   // Static method required - can't pass props directly
-  return await MicrosoftMCPAgent.serveSSE('/sse').fetch(
+  return await MicrosoftMCPAgent.serveSSE("/sse").fetch(
     request,
     env,
-    propsContext as ExecutionContext
+    propsContext as ExecutionContext,
   );
 }
 ```
 
 **Suggested Platform Improvement**:
+
 1. Add official context passing mechanism for Durable Objects
 2. Support typed context extensions in ExecutionContext
 3. Provide props propagation through DO.get() or DO.fetch()
@@ -753,23 +785,30 @@ if (request.url.endsWith('/sse')) {
 The MCP (Model Context Protocol) specification requires that certain discovery methods (`initialize`, `tools/list`, `resources/list`) must be accessible without authentication. This allows AI clients to enumerate available capabilities before requesting user authentication. However, the Cloudflare OAuth provider enforces authentication globally at the middleware level, with no built-in mechanism to selectively bypass authentication for specific JSON-RPC methods within a protected endpoint.
 
 **Technical Impact**:
+
 - MCP clients can't discover available tools without full authentication
 - Users can't see what permissions they're granting before OAuth flow
 - Violates MCP protocol specification for discovery phase
 - Forces complex authentication bypass logic in application code
 
-**Current Workaround**: 
+**Current Workaround**:
 We temporarily nullify props during discovery method detection:
 
 ```typescript
-const discoveryMethods = ['initialize', 'tools/list', 'resources/list', 'prompts/list'];
-const isDiscoveryMethod = jsonRpcRequest && discoveryMethods.includes(jsonRpcRequest.method);
+const discoveryMethods = [
+  "initialize",
+  "tools/list",
+  "resources/list",
+  "prompts/list",
+];
+const isDiscoveryMethod =
+  jsonRpcRequest && discoveryMethods.includes(jsonRpcRequest.method);
 
 if (isDiscoveryMethod) {
   // Temporarily bypass authentication
   const originalProps = this.props;
   (this as any).props = null;
-  
+
   try {
     const response = await super.fetch(request);
     return response;
@@ -780,6 +819,7 @@ if (isDiscoveryMethod) {
 ```
 
 **Suggested Platform Improvement**:
+
 1. Add route-level authentication bypass in OAuth provider
 2. Support method-level authentication policies
 3. Provide discovery mode flag in OAuth configuration
@@ -791,12 +831,13 @@ if (isDiscoveryMethod) {
 When using the OAuth provider wrapper pattern, WebSocket upgrade requests must be delegated to the Durable Object before any OAuth processing occurs. The OAuth provider's middleware intercepts all requests and attempts to parse them as HTTP, which corrupts the WebSocket upgrade handshake. By the time the request reaches our handler, the WebSocket upgrade is already broken. This timing issue forces us to detect and delegate WebSocket requests at the earliest possible point in the request pipeline.
 
 **Technical Impact**:
+
 - WebSocket upgrades fail if processed by OAuth middleware
 - Must detect WebSocket before any request parsing
 - Loses OAuth context for WebSocket connections
 - Cannot apply authentication to WebSocket endpoints
 
-**Current Workaround**: 
+**Current Workaround**:
 We implemented early detection and delegation before OAuth processing:
 
 ```typescript
@@ -805,13 +846,14 @@ async fetch(request: Request): Promise<Response> {
   if (this.isWebSocketUpgrade(request)) {
     return await super.fetch(request); // Delegate directly to MCP SDK
   }
-  
+
   // Continue with OAuth provider processing for other requests
   return this.handleHttpRequest(request);
 }
 ```
 
 **Suggested Platform Improvement**:
+
 1. Support WebSocket-aware middleware in OAuth provider
 2. Provide WebSocket upgrade preservation through middleware chain
 3. Enable selective middleware bypass for upgrade requests
@@ -823,34 +865,41 @@ async fetch(request: Request): Promise<Response> {
 The MCP remote client (`mcp-remote`) expects to use a static, pre-configured client ID for OAuth flows, similar to traditional OAuth implementations. However, Cloudflare's OAuth provider implements Dynamic Client Registration (DCR) where clients register themselves and receive dynamically generated IDs. This mismatch means mcp-remote's hardcoded client ID doesn't exist in the OAuth provider's registry, causing authentication failures. The OAuth provider also doesn't support client ID aliasing or static registration.
 
 **Technical Impact**:
+
 - mcp-remote authentication fails with "invalid_client" errors
 - Cannot pre-configure client IDs for known clients
 - Each client registration creates a new ID, breaking configuration
 - Client ID mapping logic adds complexity and potential race conditions
 
-**Current Workaround**: 
+**Current Workaround**:
 We maintain a KV-based mapping between static and dynamic client IDs:
 
 ```typescript
-const MCP_CLIENT_ID = 'rWJu8WV42zC5pfGT'; // Static ID for mcp-remote
+const MCP_CLIENT_ID = "rWJu8WV42zC5pfGT"; // Static ID for mcp-remote
 
 // Store mapping in CONFIG_KV
-await env.CONFIG_KV.put(`static_client_actual:${MCP_CLIENT_ID}`, actualDynamicClientId);
+await env.CONFIG_KV.put(
+  `static_client_actual:${MCP_CLIENT_ID}`,
+  actualDynamicClientId,
+);
 
 // Handle authorization requests with ID mapping
 async function handleAuthorizeWithClientMapping(request) {
   const url = new URL(request.url);
-  const requestedClientId = url.searchParams.get('client_id');
-  
+  const requestedClientId = url.searchParams.get("client_id");
+
   if (requestedClientId === MCP_CLIENT_ID) {
-    const actualClientId = await env.CONFIG_KV.get(`static_client_actual:${MCP_CLIENT_ID}`);
-    url.searchParams.set('client_id', actualClientId);
+    const actualClientId = await env.CONFIG_KV.get(
+      `static_client_actual:${MCP_CLIENT_ID}`,
+    );
+    url.searchParams.set("client_id", actualClientId);
     return processOAuthRequest(url);
   }
 }
 ```
 
 **Suggested Platform Improvement**:
+
 1. Support static client registration in OAuth provider
 2. Enable client ID aliasing/mapping natively
 3. Provide pre-registration API for known clients
@@ -862,12 +911,13 @@ async function handleAuthorizeWithClientMapping(request) {
 In our implementation, an empty or null `props` object can occur in multiple scenarios: during the discovery phase (legitimate), after authentication failure (error state), or when props are lost during context passing (bug). This ambiguity makes it difficult to distinguish between intentional unauthenticated access and actual errors. The lack of explicit state indicators forces us to infer the context from other signals, leading to fragile code that can fail in unexpected ways.
 
 **Technical Impact**:
+
 - Cannot distinguish between discovery mode and authentication errors
 - Debugging authentication issues becomes complex
 - Error messages may be incorrect or misleading
 - State management code becomes convoluted with multiple checks
 
-**Current Workaround**: 
+**Current Workaround**:
 We track discovery context explicitly to disambiguate empty props:
 
 ```typescript
@@ -892,6 +942,7 @@ if (!this.props && !this.discoveryContext.isDiscovery) {
 ```
 
 **Suggested Platform Improvement**:
+
 1. Provide explicit authentication state in context
 2. Support nullable props with state indicators
 3. Add discovery mode flag to Durable Objects
@@ -903,12 +954,13 @@ if (!this.props && !this.discoveryContext.isDiscovery) {
 Server-Sent Events (SSE) is our fallback transport when WebSocket fails due to HTTP/2. However, the Cloudflare Workers runtime requires SSE handlers to be implemented as static methods on Durable Objects when using the agents library pattern. This creates a challenge because static methods can't access instance properties (like authentication props), forcing us to pass all context through the ExecutionContext in creative ways. The static method requirement seems to be related to how Cloudflare optimizes HTTP/2 connection handling at the edge.
 
 **Technical Impact**:
+
 - Cannot access instance properties in SSE handler
 - Props must be passed through ExecutionContext gymnastics
 - Type safety is lost in static method signature
 - Makes SSE implementation more complex than necessary
 
-**Current Workaround**: 
+**Current Workaround**:
 We implement a static `serveSSE()` method that creates temporary sessions:
 
 ```typescript
@@ -919,28 +971,29 @@ export class MicrosoftMCPAgent extends McpAgent {
       fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
         // Extract props from ExecutionContext (injected by OAuth provider)
         const props = (ctx as any).props;
-        
+
         // Create session ID based on auth state
-        const sessionId = props?.userId || 'discovery-session';
+        const sessionId = props?.userId || "discovery-session";
         const id = env.MCP_OBJECT.idFromName(sessionId);
         const stub = env.MCP_OBJECT.get(id);
-        
+
         // Props must be passed through request modification
         const modifiedRequest = new Request(request, {
           headers: {
             ...Object.fromEntries(request.headers),
-            'X-MCP-Props': JSON.stringify(props)
-          }
+            "X-MCP-Props": JSON.stringify(props),
+          },
         });
-        
+
         return stub.fetch(modifiedRequest);
-      }
+      },
     };
   }
 }
 ```
 
 **Suggested Platform Improvement**:
+
 1. Allow instance methods for SSE handlers in agents library
 2. Provide props injection mechanism for static methods
 3. Support SSE without static method requirement
@@ -967,7 +1020,7 @@ The system implements automatic token refresh via OAuth Provider handling when M
 
 ```typescript
 // Automatic refresh token handling
-if (options.grantType === 'refresh_token') {
+if (options.grantType === "refresh_token") {
   const refreshToken = options.props.microsoftRefreshToken;
   const microsoftTokens = await refreshMicrosoftTokens(refreshToken, env);
 
@@ -1027,7 +1080,6 @@ Handling of complex token scenarios including race conditions, expired refresh t
    - User changes password (conditional)
    - Security breach detection
    - Manual revocation via Graph API
-   
 6. **Clock Skew Handling**:
    - Microsoft allows 5-minute clock skew
    - Check `nbf` (not before) and `exp` (expiration) claims
@@ -1040,28 +1092,31 @@ All tokens are encrypted using AES-256-GCM before storage in KV namespaces, with
 
 ```typescript
 // Encrypt tokens before storage
-async function encryptTokens(tokens: any, encryptionKey: string): Promise<string> {
+async function encryptTokens(
+  tokens: any,
+  encryptionKey: string,
+): Promise<string> {
   const key = await crypto.subtle.importKey(
-    'raw',
+    "raw",
     new TextEncoder().encode(encryptionKey.substring(0, 32)),
-    { name: 'AES-GCM' },
+    { name: "AES-GCM" },
     false,
-    ['encrypt']
+    ["encrypt"],
   );
 
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    { name: "AES-GCM", iv },
     key,
-    new TextEncoder().encode(JSON.stringify(tokens))
+    new TextEncoder().encode(JSON.stringify(tokens)),
   );
 
   return base64URLEncode(new Uint8Array([...iv, ...new Uint8Array(encrypted)]));
 }
 
 // Store with automatic expiration
-await env.OAUTH_KV.put(`tokens:${userId}`, encryptedTokens, { 
-  expirationTtl: microsoftTokens.expires_in 
+await env.OAUTH_KV.put(`tokens:${userId}`, encryptedTokens, {
+  expirationTtl: microsoftTokens.expires_in,
 });
 ```
 
@@ -1113,16 +1168,16 @@ const timeoutId = setTimeout(() => controller.abort(), 5000);
 try {
   const response = await fetch(graphEndpoint, {
     signal: controller.signal,
-    headers: { Authorization: `Bearer ${accessToken}` }
+    headers: { Authorization: `Bearer ${accessToken}` },
   });
-  
+
   const data = await response.json();
-  
+
   // Cache successful responses
   await env.CACHE_KV.put(cacheKey, JSON.stringify(data), {
-    expirationTtl: 300
+    expirationTtl: 300,
   });
-  
+
   return data;
 } finally {
   clearTimeout(timeoutId);
@@ -1183,7 +1238,7 @@ Each Durable Object maintains session-specific state including connection time, 
 // Session-specific context tracking
 private maintainSessionContext(request: Request) {
   this.sessionState.lastActivity = Date.now();
-  
+
   if (request.method === 'POST') {
     const jsonRpc = JSON.parse(await request.text());
     if (jsonRpc.method === 'tools/call') {
@@ -1244,16 +1299,16 @@ Microsoft Graph API responses include pagination via `@odata.nextLink` for large
 async getAllPages<T>(initialUrl: string): Promise<T[]> {
   let results: T[] = [];
   let nextUrl = initialUrl;
-  
+
   while (nextUrl) {
     const response = await this.makeGraphRequest(nextUrl);
     results.push(...response.value);
     nextUrl = response['@odata.nextLink'];
-    
+
     // Prevent infinite loops
     if (results.length > 1000) break;
   }
-  
+
   return results;
 }
 ```
@@ -1291,20 +1346,32 @@ The OAuth flow supports configurable permission scopes through URL parameters, a
 ```typescript
 // Dynamic scope configuration
 const scopeConfigurations = {
-  minimal: ['User.Read', 'offline_access'],
-  email: ['User.Read', 'Mail.Read', 'Mail.Send', 'offline_access'],
-  calendar: ['User.Read', 'Calendars.ReadWrite', 'offline_access'],
-  teams: ['User.Read', 'ChannelMessage.Send', 'OnlineMeetings.ReadWrite', 'offline_access'],
+  minimal: ["User.Read", "offline_access"],
+  email: ["User.Read", "Mail.Read", "Mail.Send", "offline_access"],
+  calendar: ["User.Read", "Calendars.ReadWrite", "offline_access"],
+  teams: [
+    "User.Read",
+    "ChannelMessage.Send",
+    "OnlineMeetings.ReadWrite",
+    "offline_access",
+  ],
   full: [
-    'User.Read', 'Mail.Read', 'Mail.ReadWrite', 'Mail.Send',
-    'Calendars.Read', 'Calendars.ReadWrite', 'Contacts.ReadWrite',
-    'OnlineMeetings.ReadWrite', 'ChannelMessage.Send', 'Team.ReadBasic.All',
-    'offline_access'
+    "User.Read",
+    "Mail.Read",
+    "Mail.ReadWrite",
+    "Mail.Send",
+    "Calendars.Read",
+    "Calendars.ReadWrite",
+    "Contacts.ReadWrite",
+    "OnlineMeetings.ReadWrite",
+    "ChannelMessage.Send",
+    "Team.ReadBasic.All",
+    "offline_access",
   ],
 };
 
 // Configure scope based on client requirements
-const scope = url.searchParams.get('scope_preset') || 'full';
+const scope = url.searchParams.get("scope_preset") || "full";
 const scopes = scopeConfigurations[scope] || scopeConfigurations.full;
 ```
 
@@ -1324,20 +1391,23 @@ Full implementation of OAuth 2.1 security requirements including Proof Key for C
 Implementation of AES-256-GCM encryption for secure token storage in KV namespaces with unique initialization vectors per operation.
 
 ```typescript
-async function encryptTokens(tokens: any, encryptionKey: string): Promise<string> {
+async function encryptTokens(
+  tokens: any,
+  encryptionKey: string,
+): Promise<string> {
   const key = await crypto.subtle.importKey(
-    'raw',
+    "raw",
     new TextEncoder().encode(encryptionKey.substring(0, 32)),
-    { name: 'AES-GCM' },
+    { name: "AES-GCM" },
     false,
-    ['encrypt']
+    ["encrypt"],
   );
 
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    { name: "AES-GCM", iv },
     key,
-    new TextEncoder().encode(JSON.stringify(tokens))
+    new TextEncoder().encode(JSON.stringify(tokens)),
   );
 
   return base64URLEncode(new Uint8Array([...iv, ...new Uint8Array(encrypted)]));
@@ -1352,17 +1422,21 @@ Client approval state is stored in HMAC-signed cookies to prevent tampering and 
 async function signApprovalCookie(approvedClients, secret) {
   const payload = JSON.stringify(approvedClients);
   const key = await crypto.subtle.importKey(
-    'raw',
+    "raw",
     new TextEncoder().encode(secret),
-    { hash: 'SHA-256', name: 'HMAC' },
+    { hash: "SHA-256", name: "HMAC" },
     false,
-    ['sign']
+    ["sign"],
   );
 
-  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(payload),
+  );
   const signatureHex = Array.from(new Uint8Array(signature))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 
   return `${signatureHex}.${btoa(payload)}`;
 }
@@ -1375,11 +1449,11 @@ All user inputs rendered in HTML responses are sanitized to prevent XSS attacks,
 ```typescript
 function sanitizeHtml(unsafe: string): string {
   return unsafe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 ```
 
@@ -1404,21 +1478,24 @@ Uses multiple signals to determine client type and capabilities, enabling the se
 ```typescript
 function detectClientType(signals) {
   // Application detection
-  if (signals.redirectUri?.includes('your-application.com')) {
-    return 'web-application';
+  if (signals.redirectUri?.includes("your-application.com")) {
+    return "web-application";
   }
 
   // mcp-remote detection via other signals
-  if (signals.userAgent?.includes('mcp-remote') || signals.upgradeHeader === 'websocket') {
-    return 'mcp-remote';
+  if (
+    signals.userAgent?.includes("mcp-remote") ||
+    signals.upgradeHeader === "websocket"
+  ) {
+    return "mcp-remote";
   }
 
   // WebSocket client detection
-  if (signals.upgradeHeader === 'websocket') {
-    return 'websocket-client';
+  if (signals.upgradeHeader === "websocket") {
+    return "websocket-client";
   }
 
-  return 'unknown';
+  return "unknown";
 }
 ```
 
@@ -1429,19 +1506,19 @@ Implements selective authentication based on requested operations - discovery en
 ```typescript
 // Handshake methods work without authentication
 const handshakeMethods = [
-  'initialize',
-  'initialized',
-  'tools/list',
-  'resources/list',
-  'prompts/list',
-  'notifications/initialized',
+  "initialize",
+  "initialized",
+  "tools/list",
+  "resources/list",
+  "prompts/list",
+  "notifications/initialized",
 ];
 
 if (handshakeMethods.includes(message.method)) {
   return handleHandshake(message);
 }
 
-if (message.method === 'tools/call') {
+if (message.method === "tools/call") {
   return requireAuthentication(message);
 }
 ```
@@ -1462,9 +1539,9 @@ Workarounds for Cloudflare's HTTP/2 proxy limitations that strip WebSocket upgra
 ```typescript
 // Multi-signal WebSocket detection
 const isWebSocketRequest =
-  upgradeHeader?.toLowerCase() === 'websocket' ||
+  upgradeHeader?.toLowerCase() === "websocket" ||
   (webSocketKey && webSocketVersion) ||
-  connectionHeader?.toLowerCase().includes('upgrade');
+  connectionHeader?.toLowerCase().includes("upgrade");
 ```
 
 ## Implementation Analysis
@@ -1590,19 +1667,22 @@ All protocols use the same `/sse` endpoint with automatic protocol detection bas
 ```typescript
 // WebSocket detection
 if (
-  request.headers.get('Upgrade')?.toLowerCase() === 'websocket' ||
-  request.headers.get('Sec-WebSocket-Key')
+  request.headers.get("Upgrade")?.toLowerCase() === "websocket" ||
+  request.headers.get("Sec-WebSocket-Key")
 ) {
   // Route to WebSocket handler
 }
 
 // SSE detection
-if (request.method === 'GET' && request.headers.get('Accept')?.includes('text/event-stream')) {
+if (
+  request.method === "GET" &&
+  request.headers.get("Accept")?.includes("text/event-stream")
+) {
   // Route to SSE handler
 }
 
 // JSON-RPC detection
-if (request.method === 'POST') {
+if (request.method === "POST") {
   // Route to JSON-RPC handler
 }
 ```
@@ -1684,10 +1764,17 @@ Content-Type: application/json
         "inputSchema": {
           "type": "object",
           "properties": {
-            "to": { "type": "string", "description": "Recipient email address" },
+            "to": {
+              "type": "string",
+              "description": "Recipient email address"
+            },
             "subject": { "type": "string", "description": "Email subject" },
             "body": { "type": "string", "description": "Email body content" },
-            "contentType": { "type": "string", "enum": ["text", "html"], "default": "html" }
+            "contentType": {
+              "type": "string",
+              "enum": ["text", "html"],
+              "default": "html"
+            }
           },
           "required": ["to", "subject", "body"]
         }
@@ -1704,7 +1791,11 @@ Content-Type: application/json
               "default": 10,
               "description": "Number of emails"
             },
-            "folder": { "type": "string", "default": "inbox", "description": "Mail folder" }
+            "folder": {
+              "type": "string",
+              "default": "inbox",
+              "description": "Mail folder"
+            }
           }
         }
       }
@@ -2426,49 +2517,49 @@ curl -X POST https://your-domain.com/sse \
 Demonstrates establishing a WebSocket connection from Node.js for bidirectional real-time communication with the MCP server. WebSockets provide full-duplex communication channels ideal for interactive applications.
 
 ```javascript
-const WebSocket = require('ws');
+const WebSocket = require("ws");
 
-const ws = new WebSocket('wss://your-domain.com/sse', {
+const ws = new WebSocket("wss://your-domain.com/sse", {
   headers: {
-    Authorization: 'Bearer YOUR_OAUTH_TOKEN',
+    Authorization: "Bearer YOUR_OAUTH_TOKEN",
   },
 });
 
-ws.on('open', function open() {
+ws.on("open", function open() {
   // Initialize MCP connection
   ws.send(
     JSON.stringify({
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id: 1,
-      method: 'initialize',
+      method: "initialize",
       params: {
-        protocolVersion: '2024-11-05',
+        protocolVersion: "2024-11-05",
         capabilities: {},
         clientInfo: {
-          name: 'nodejs-client',
-          version: '1.0.0',
+          name: "nodejs-client",
+          version: "1.0.0",
         },
       },
-    })
+    }),
   );
 });
 
-ws.on('message', function message(data) {
+ws.on("message", function message(data) {
   const response = JSON.parse(data.toString());
-  console.log('Received:', response);
+  console.log("Received:", response);
 
   if (response.id === 1) {
     // Server initialized, now call a tool
     ws.send(
       JSON.stringify({
-        jsonrpc: '2.0',
+        jsonrpc: "2.0",
         id: 2,
-        method: 'tools/call',
+        method: "tools/call",
         params: {
-          name: 'getEmails',
+          name: "getEmails",
           arguments: { count: 10 },
         },
-      })
+      }),
     );
   }
 });
@@ -2480,25 +2571,27 @@ Shows browser-based connection using Server-Sent Events for unidirectional serve
 
 ```javascript
 // For web applications using SSE
-const eventSource = new EventSource('https://your-domain.com/sse?token=YOUR_TOKEN');
+const eventSource = new EventSource(
+  "https://your-domain.com/sse?token=YOUR_TOKEN",
+);
 
 eventSource.onmessage = function (event) {
   const data = JSON.parse(event.data);
-  console.log('MCP Response:', data);
+  console.log("MCP Response:", data);
 };
 
 // Send JSON-RPC requests via fetch
 async function callTool(name, arguments) {
-  const response = await fetch('https://your-domain.com/sse', {
-    method: 'POST',
+  const response = await fetch("https://your-domain.com/sse", {
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer YOUR_TOKEN',
+      "Content-Type": "application/json",
+      Authorization: "Bearer YOUR_TOKEN",
     },
     body: JSON.stringify({
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id: Date.now(),
-      method: 'tools/call',
+      method: "tools/call",
       params: { name, arguments },
     }),
   });
@@ -2507,10 +2600,10 @@ async function callTool(name, arguments) {
 }
 
 // Usage
-callTool('sendEmail', {
-  to: 'recipient@company.com',
-  subject: 'API Test',
-  body: 'This email was sent via the MCP API',
+callTool("sendEmail", {
+  to: "recipient@company.com",
+  subject: "API Test",
+  body: "This email was sent via the MCP API",
 });
 ```
 
@@ -2647,7 +2740,7 @@ This section provides critical recommendations for hardening the Microsoft 365 M
 
 ```typescript
 // Example test structure for Microsoft Graph Client
-describe('MicrosoftGraphClient', () => {
+describe("MicrosoftGraphClient", () => {
   let client: MicrosoftGraphClient;
   let mockEnv: Env;
 
@@ -2656,31 +2749,33 @@ describe('MicrosoftGraphClient', () => {
     client = new MicrosoftGraphClient(mockEnv);
   });
 
-  describe('sendEmail', () => {
-    it('should send email with valid parameters', async () => {
-      const mockToken = 'valid-token';
+  describe("sendEmail", () => {
+    it("should send email with valid parameters", async () => {
+      const mockToken = "valid-token";
       const params = {
-        to: 'user@example.com',
-        subject: 'Test',
-        body: 'Test email',
-        contentType: 'text' as const
+        to: "user@example.com",
+        subject: "Test",
+        body: "Test email",
+        contentType: "text" as const,
       };
 
       const result = await client.sendEmail(mockToken, params);
       expect(result.success).toBe(true);
     });
 
-    it('should handle Graph API errors gracefully', async () => {
+    it("should handle Graph API errors gracefully", async () => {
       // Mock 401 unauthorized response
-      const mockToken = 'invalid-token';
-      await expect(client.sendEmail(mockToken, params))
-        .rejects.toThrow('Unauthorized');
+      const mockToken = "invalid-token";
+      await expect(client.sendEmail(mockToken, params)).rejects.toThrow(
+        "Unauthorized",
+      );
     });
   });
 });
 ```
 
 **Testing Priorities**:
+
 - Unit tests for all Microsoft Graph API methods
 - Integration tests for OAuth flow
 - Error scenario coverage (expired tokens, API limits, network failures)
@@ -2688,11 +2783,12 @@ describe('MicrosoftGraphClient', () => {
 - Minimum 80% code coverage target
 
 **Tools to Add**:
+
 ```json
 {
   "devDependencies": {
     "@vitest/coverage-c8": "^0.34.0",
-    "msw": "^2.0.0"  // Mock Service Worker for API mocking
+    "msw": "^2.0.0" // Mock Service Worker for API mocking
   }
 }
 ```
@@ -2726,12 +2822,12 @@ export async function withErrorHandling<T>(
   } catch (error) {
     // Log error with context
     console.error(`Error in ${context}:`, error);
-    
+
     // Handle specific error types
     if (error instanceof Response) {
       const status = error.status;
       const body = await error.text();
-      
+
       if (status === 429) {
         throw new APIError(
           'Rate limit exceeded',
@@ -2740,14 +2836,14 @@ export async function withErrorHandling<T>(
           true
         );
       }
-      
+
       if (status === 401) {
         throw new APIError('Authentication failed', 401, body, false);
       }
-      
+
       throw new APIError(`API request failed: ${body}`, status);
     }
-    
+
     // Re-throw unknown errors
     throw error;
   }
@@ -2775,6 +2871,7 @@ async sendEmail(accessToken: string, params: EmailParams): Promise<any> {
 ```
 
 **Key Improvements**:
+
 - Wrap all external API calls
 - Implement retry logic with exponential backoff
 - Provide user-friendly error messages
@@ -2790,7 +2887,7 @@ async sendEmail(accessToken: string, params: EmailParams): Promise<any> {
 ```typescript
 export class RateLimiter {
   private requests: Map<string, number[]> = new Map();
-  
+
   constructor(
     private windowMs: number = 60000,  // 1 minute window
     private maxRequests: number = 100   // Max requests per window
@@ -2803,13 +2900,13 @@ export class RateLimiter {
   }> {
     const now = Date.now();
     const windowStart = now - this.windowMs;
-    
+
     // Get existing requests for this client
     const clientRequests = this.requests.get(clientId) || [];
-    
+
     // Filter out requests outside the current window
     const validRequests = clientRequests.filter(time => time > windowStart);
-    
+
     if (validRequests.length >= this.maxRequests) {
       return {
         allowed: false,
@@ -2817,11 +2914,11 @@ export class RateLimiter {
         resetAt: validRequests[0] + this.windowMs
       };
     }
-    
+
     // Add current request
     validRequests.push(now);
     this.requests.set(clientId, validRequests);
-    
+
     return {
       allowed: true,
       remaining: this.maxRequests - validRequests.length,
@@ -2834,9 +2931,9 @@ export class RateLimiter {
 async handleRequest(request: Request): Promise<Response> {
   const clientId = this.getClientId(request);
   const limiter = new RateLimiter(60000, 100); // 100 requests per minute
-  
+
   const { allowed, remaining, resetAt } = await limiter.checkLimit(clientId);
-  
+
   if (!allowed) {
     return new Response('Rate limit exceeded', {
       status: 429,
@@ -2848,20 +2945,21 @@ async handleRequest(request: Request): Promise<Response> {
       }
     });
   }
-  
+
   // Process request...
   const response = await this.processRequest(request);
-  
+
   // Add rate limit headers to response
   response.headers.set('X-RateLimit-Limit', '100');
   response.headers.set('X-RateLimit-Remaining', remaining.toString());
   response.headers.set('X-RateLimit-Reset', resetAt.toString());
-  
+
   return response;
 }
 ```
 
 **Configuration Options**:
+
 - Per-user rate limiting using OAuth tokens
 - Different limits for different endpoints
 - Graduated limits based on user tier
@@ -2889,7 +2987,7 @@ interface LogEntry {
 
 export class Logger {
   constructor(private service: string) {}
-  
+
   private createEntry(
     level: LogEntry['level'],
     message: string,
@@ -2904,12 +3002,12 @@ export class Logger {
       ...metadata
     };
   }
-  
+
   info(message: string, metadata?: Partial<LogEntry>) {
     const entry = this.createEntry('info', message, metadata);
     console.log(JSON.stringify(entry));
   }
-  
+
   error(message: string, error: any, metadata?: Partial<LogEntry>) {
     const entry = this.createEntry('error', message, {
       ...metadata,
@@ -2921,7 +3019,7 @@ export class Logger {
     });
     console.error(JSON.stringify(entry));
   }
-  
+
   metric(name: string, value: number, tags?: Record<string, string>) {
     // Send to analytics platform
     this.info(`Metric: ${name}`, {
@@ -2940,22 +3038,22 @@ const logger = new Logger('MicrosoftGraphClient');
 async sendEmail(token: string, params: EmailParams): Promise<any> {
   const correlationId = crypto.randomUUID();
   const startTime = Date.now();
-  
+
   logger.info('Sending email', {
     correlationId,
     operation: 'sendEmail',
     metadata: { to: params.to }
   });
-  
+
   try {
     const result = await this.graphApiCall(token, params);
-    
+
     logger.metric('email.sent', 1, { status: 'success' });
     logger.info('Email sent successfully', {
       correlationId,
       duration: Date.now() - startTime
     });
-    
+
     return result;
   } catch (error) {
     logger.metric('email.sent', 1, { status: 'error' });
@@ -2969,6 +3067,7 @@ async sendEmail(token: string, params: EmailParams): Promise<any> {
 ```
 
 **Key Metrics to Track**:
+
 - Request count and latency per endpoint
 - OAuth success/failure rates
 - Microsoft Graph API response times
@@ -2977,24 +3076,25 @@ async sendEmail(token: string, params: EmailParams): Promise<any> {
 - Active user sessions
 
 **Health Check Endpoint**:
+
 ```typescript
 export async function handleHealthCheck(): Promise<Response> {
   const health = {
-    status: 'healthy',
+    status: "healthy",
     timestamp: new Date().toISOString(),
     checks: {
       oauth: await checkOAuthProvider(),
       graphApi: await checkGraphAPIConnectivity(),
       durableObjects: await checkDurableObjects(),
-      kvStorage: await checkKVNamespaces()
-    }
+      kvStorage: await checkKVNamespaces(),
+    },
   };
-  
-  const allHealthy = Object.values(health.checks).every(c => c.healthy);
-  
+
+  const allHealthy = Object.values(health.checks).every((c) => c.healthy);
+
   return new Response(JSON.stringify(health), {
     status: allHealthy ? 200 : 503,
-    headers: { 'Content-Type': 'application/json' }
+    headers: { "Content-Type": "application/json" },
   });
 }
 ```
@@ -3065,17 +3165,18 @@ export async function validateInput<T>(
 async sendEmail(token: string, params: unknown): Promise<any> {
   // Validate and sanitize input
   const validated = await validateInput(EmailParamsSchema, params);
-  
+
   if (validated.contentType === 'html') {
     validated.body = sanitizeHtml(validated.body);
   }
-  
+
   // Proceed with validated data
   return this.graphApiCall(token, validated);
 }
 ```
 
 **Security Best Practices**:
+
 - Validate all user inputs against schemas
 - Sanitize HTML content to prevent XSS
 - Implement request size limits
@@ -3086,29 +3187,33 @@ async sendEmail(token: string, params: unknown): Promise<any> {
 ### 6. Performance Optimization
 
 **Caching Strategy**:
+
 ```typescript
 // Implement intelligent caching for frequently accessed data
 export class CacheManager {
   constructor(private kv: KVNamespace) {}
-  
+
   async get<T>(key: string): Promise<T | null> {
-    const cached = await this.kv.get(key, 'json');
+    const cached = await this.kv.get(key, "json");
     if (!cached) return null;
-    
+
     const { data, expires } = cached as any;
     if (Date.now() > expires) {
       await this.kv.delete(key);
       return null;
     }
-    
+
     return data;
   }
-  
+
   async set<T>(key: string, data: T, ttlSeconds: number = 300) {
-    await this.kv.put(key, JSON.stringify({
-      data,
-      expires: Date.now() + (ttlSeconds * 1000)
-    }));
+    await this.kv.put(
+      key,
+      JSON.stringify({
+        data,
+        expires: Date.now() + ttlSeconds * 1000,
+      }),
+    );
   }
 }
 ```
