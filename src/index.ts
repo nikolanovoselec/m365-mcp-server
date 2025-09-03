@@ -1,40 +1,66 @@
 /**
- * Microsoft 365 MCP Server - Unified Endpoint Architecture
- * Supports Claude Desktop direct connector + mcp-remote with single /sse endpoint
+ * Microsoft 365 MCP Server - Cloudflare Workers Implementation
+ * 
+ * ARCHITECTURE NOTES:
+ * OAuth Provider wrapper pattern is REQUIRED (not over-engineering) due to:
+ * 1. Cloudflare defaults to HTTP/2, preventing direct WebSocket upgrades
+ * 2. MCP Agent's WebSocket requirement conflicts with platform limitations
+ * 3. Need to bridge Cloudflare OAuth tokens with Microsoft Graph tokens
+ * 
+ * This complex routing enables:
+ * - SSE transport for MCP protocol (primary)
+ * - HTTP JSON-RPC fallback (secondary)
+ * - WebSocket simulation via SSE (when needed)
+ * 
+ * Compatible with all MCP clients (AI assistants, chatbots, automation tools)
+ * Single /sse endpoint serves all MCP protocol variants through static methods
  */
 
 import OAuthProvider from '@cloudflare/workers-oauth-provider';
 import { MicrosoftMCPAgent } from './microsoft-mcp-agent';
 import { MicrosoftHandler } from './microsoft-handler';
 
+/**
+ * Export Durable Object class for Cloudflare Workers runtime registration
+ * Required for wrangler.toml [[durable_objects.bindings]] configuration
+ */
+export { MicrosoftMCPAgent };
+
 export interface Env {
-  // Environment variables
+  /** Microsoft Entra ID application configuration */
   MICROSOFT_CLIENT_ID: string;
   MICROSOFT_TENANT_ID: string;
   GRAPH_API_VERSION: string;
-  
-  // Deployment configuration
-  WORKER_DOMAIN: string;  // e.g., "your-worker.your-subdomain.workers.dev"
-  PROTOCOL: string;       // "https" or "http" for development
 
-  // Secrets
+  /** Cloudflare Workers deployment configuration */
+  WORKER_DOMAIN: string; /* Worker subdomain: "your-worker.your-subdomain.workers.dev" */
+  PROTOCOL: string; /* Protocol scheme: "https" for production, "http" for local dev */
+
+  /** Sensitive credentials - deployed via 'wrangler secret put' command */
   MICROSOFT_CLIENT_SECRET: string;
   COOKIE_ENCRYPTION_KEY: string;
   ENCRYPTION_KEY: string;
   COOKIE_SECRET: string;
 
-  // Durable Objects
-  MICROSOFT_MCP_AGENT: DurableObjectNamespace;
+  /** Durable Object namespace binding for MCP Agent instances */
+  MCP_OBJECT: DurableObjectNamespace;
 
-  // KV Namespaces
+  /** KV storage namespaces for configuration and caching */
   CONFIG_KV: KVNamespace;
   CACHE_KV: KVNamespace;
 
-  // OAuth KV (required by OAuthProvider)
+  /** 
+   * OAuth KV namespace - REQUIRED by @cloudflare/workers-oauth-provider
+   * Paradoxically remains empty in this implementation but must exist
+   * to prevent runtime errors when OAuth Provider checks for client existence
+   */
   OAUTH_KV: KVNamespace;
 }
 
-// Microsoft OAuth token response type
+/**
+ * Microsoft OAuth 2.1 token endpoint response structure
+ * Matches Microsoft Identity Platform v2.0 token response specification
+ */
 interface MicrosoftTokenResponse {
   access_token: string;
   token_type: string;
@@ -43,7 +69,18 @@ interface MicrosoftTokenResponse {
   scope: string;
 }
 
-// Microsoft OAuth token exchange functions
+/**
+ * Exchange Microsoft authorization code for access/refresh tokens
+ * 
+ * Implements OAuth 2.1 authorization code flow with PKCE (S256)
+ * Called by tokenExchangeCallback after Microsoft authentication
+ * 
+ * @param authorizationCode - Code received from Microsoft OAuth callback
+ * @param env - Cloudflare Worker environment bindings
+ * @param redirectUri - Must match the redirect URI used in authorization request
+ * @returns Microsoft OAuth tokens including access_token and refresh_token
+ * @throws Error if token exchange fails with Microsoft Identity Platform
+ */
 async function exchangeMicrosoftTokens(
   authorizationCode: string,
   env: Env,
@@ -58,7 +95,7 @@ async function exchangeMicrosoftTokens(
     redirect_uri: redirectUri,
     grant_type: 'authorization_code',
     scope:
-      'User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.Read Calendars.ReadWrite Contacts.ReadWrite OnlineMeetings.ReadWrite ChannelMessage.Send Team.ReadBasic.All offline_access',
+      'User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.Read Calendars.ReadWrite Contacts.Read Contacts.ReadWrite People.Read People.Read.All OnlineMeetings.ReadWrite ChannelMessage.Send Team.ReadBasic.All offline_access',
   });
 
   const response = await fetch(tokenUrl, {
@@ -77,6 +114,17 @@ async function exchangeMicrosoftTokens(
   return (await response.json()) as MicrosoftTokenResponse;
 }
 
+/**
+ * Refresh Microsoft access tokens using refresh token
+ * 
+ * Implements OAuth 2.1 refresh token grant for token renewal
+ * Automatically called by OAuth Provider when access token expires
+ * 
+ * @param refreshToken - Valid Microsoft refresh token from previous authorization
+ * @param env - Cloudflare Worker environment bindings
+ * @returns New Microsoft OAuth tokens including fresh access_token
+ * @throws Error if refresh fails (user needs to re-authenticate)
+ */
 async function refreshMicrosoftTokens(
   refreshToken: string,
   env: Env
@@ -89,7 +137,7 @@ async function refreshMicrosoftTokens(
     refresh_token: refreshToken,
     grant_type: 'refresh_token',
     scope:
-      'User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.Read Calendars.ReadWrite Contacts.ReadWrite OnlineMeetings.ReadWrite ChannelMessage.Send Team.ReadBasic.All offline_access',
+      'User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.Read Calendars.ReadWrite Contacts.Read Contacts.ReadWrite People.Read People.Read.All OnlineMeetings.ReadWrite ChannelMessage.Send Team.ReadBasic.All offline_access',
   });
 
   const response = await fetch(tokenUrl, {
@@ -108,90 +156,69 @@ async function refreshMicrosoftTokens(
   return (await response.json()) as MicrosoftTokenResponse;
 }
 
-// 🔥 UNIFIED ENDPOINT ARCHITECTURE
-// Single /sse endpoint supporting GET, POST, and WebSocket for all clients
-// - Claude Desktop: GET (SSE validation) + WebSocket upgrade
-// - mcp-remote: WebSocket with OAuth flow
-// - Direct testing: POST JSON-RPC
+// ============================================================================
+// ARCHITECTURAL NOTES
+// ============================================================================
 
-// Hybrid MCP handler supporting GET (SSE), POST (JSON-RPC), and WebSocket
-async function handleHybridMcp(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  const url = new URL(request.url);
-  
-  // Protocol 1: WebSocket upgrade requests (check FIRST - WebSocket upgrades are GET requests)
-  const upgradeHeader = request.headers.get('Upgrade');
-  const webSocketKey = request.headers.get('Sec-WebSocket-Key');
-  const webSocketVersion = request.headers.get('Sec-WebSocket-Version');
-  
-  if ((upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') || 
-      (webSocketKey && webSocketVersion)) {
-    console.log('WebSocket upgrade detected - using simplified WebSocket handler');
-    
-    // For now, return the old behavior that worked (delegate to OAuth provider)  
-    // TODO: Implement proper WebSocket handling following Cloudflare template
-    try {
-      // Generate unique session ID for WebSocket connection
-      const sessionId = crypto.randomUUID();
-      const id = env.MICROSOFT_MCP_AGENT.idFromName(`ws-${sessionId}`);
-      const stub = env.MICROSOFT_MCP_AGENT.get(id);
-      
-      // Add required headers for MCP agent WebSocket handling
-      const modifiedRequest = new Request(request, {
-        headers: {
-          ...Object.fromEntries(request.headers.entries()),
-          'X-WebSocket-Session': sessionId,
-          'X-MCP-Mode': 'websocket'
-        }
-      });
-      
-      return stub.fetch(modifiedRequest);
-    } catch (error) {
-      console.error('WebSocket upgrade error:', error);
-      return new Response(`WebSocket upgrade failed: ${error}`, { status: 500 });
-    }
-  }
-  
-  // Protocol 2: GET requests with SSE headers (Claude Desktop MCP over SSE)
-  if (request.method === 'GET') {
-    const acceptHeader = request.headers.get('Accept');
-    if (acceptHeader && acceptHeader.includes('text/event-stream')) {
-      console.log('SSE MCP connection requested');
-      return handleSSEMcp(request, env);
-    }
-    return new Response('GET requests must include Accept: text/event-stream for SSE or provide WebSocket headers', { status: 400 });
-  }
-  
-  // Protocol 3: POST requests (Direct JSON-RPC for testing)
-  if (request.method === 'POST') {
-    return handleDirectJsonRpc(request, env);
-  }
-  
-  return new Response('Unsupported method - Use GET (SSE), POST (JSON-RPC), or WebSocket upgrade', { status: 405 });
-}
+/**
+ * REQUEST FLOW ARCHITECTURE:
+ * 
+ * 1. API Token Mode Check (REQUIRED for MCP compliance)
+ *    - Detects unauthenticated discovery requests (tools/list)
+ *    - Distinguishes OAuth tokens (3-part format) from API tokens
+ *    - Allows tool enumeration before user authentication
+ * 
+ * 2. OAuth Provider Processing
+ *    - Manages dual token architecture (Cloudflare + Microsoft)
+ *    - Handles OAuth 2.1 + PKCE authorization flow
+ *    - Stores tokens in props for MCP Agent access
+ * 
+ * 3. MCP Agent Invocation
+ *    - Static serveSSE() method creates Durable Object instances
+ *    - Props containing Microsoft tokens passed via ExecutionContext
+ *    - Handles all MCP protocol operations with Graph API integration
+ */
 
-// Client ID mapping for MCP compatibility
-const CLIENT_ID_MAPPING: Record<string, string> = {};
+// ============================================================================
+// DEPRECATED FUNCTIONS - Preserved for reference
+// ============================================================================
 
-// Pre-registered client ID for mcp-remote compatibility (MCP spec allows hardcoded client IDs)
+/**
+ * @deprecated Client ID mapping no longer used with static OAuth Provider
+ * Preserved to show evolution from dynamic to static client registration
+ * Original purpose: Map static client IDs to dynamically registered ones
+ * Deprecation reason: OAuth Provider now handles client management internally
+ */
+
+/**
+ * Static MCP client identifier for discovery session consistency
+ * Used to maintain same client ID across unauthenticated discovery requests
+ */
 const MCP_CLIENT_ID = 'rWJu8WV42zC5pfGT';
 
-// Initialize static MCP client using OAuth helpers when available
+/**
+ * Initialize static MCP client in OAuth KV storage
+ * 
+ * ARCHITECTURAL QUIRK:
+ * Function attempts to store client in OAUTH_KV but OAuth Provider ignores it
+ * OAuth Provider manages clients internally, making this effectively a no-op
+ * Retained for compatibility with potential future OAuth Provider versions
+ * 
+ * @param env - Cloudflare Worker environment containing OAUTH_KV namespace
+ */
 export async function initializeMCPClient(env: any): Promise<void> {
   try {
-    console.log(`Checking if MCP client exists: ${MCP_CLIENT_ID}`);
-    
-    // Check if client already exists in KV
+    /** Attempt to retrieve existing client from KV (always returns null in practice) */
     const existingClient = await env.OAUTH_KV.get(`client:${MCP_CLIENT_ID}`);
     if (existingClient) {
-      console.log(`Static MCP client already exists: ${MCP_CLIENT_ID}`);
       return;
     }
-    
-    console.log(`Creating static MCP client: ${MCP_CLIENT_ID}`);
-    
-    // Manually create client record with the specific client ID we need
-    // The OAuth provider's createClient() generates random IDs, which doesn't work for our static use case
-    // Format must match exactly what the OAuth provider expects
+
+    /**
+     * Client record structure matching OAuth Provider's expected format
+     * Note: Despite storing this in KV, OAuth Provider manages clients internally
+     * and this KV record is effectively ignored
+     */
     const clientInfo = {
       clientId: MCP_CLIENT_ID,
       clientName: 'Microsoft 365 MCP Static Client',
@@ -200,193 +227,193 @@ export async function initializeMCPClient(env: any): Promise<void> {
       tokenEndpointAuthMethod: 'none',
       grantTypes: ['authorization_code', 'refresh_token'],
       responseTypes: ['code'],
-      registrationDate: Math.floor(Date.now() / 1000) // Unix timestamp in seconds
+      registrationDate: Math.floor(Date.now() / 1000), // Unix timestamp in seconds
     };
-    
-    // Store client in KV using the same key format as OAuthProvider
+
+    /** Store client using OAuth Provider's key format (client:{id}) */
     await env.OAUTH_KV.put(`client:${MCP_CLIENT_ID}`, JSON.stringify(clientInfo));
-    
-    console.log(`Successfully created static MCP client: ${MCP_CLIENT_ID}`);
   } catch (error) {
-    console.error('Failed to initialize MCP client:', error);
-    // Don't throw - let the worker continue, client might get created later
+    /** Non-fatal error - OAuth Provider will handle client creation dynamically */
   }
 }
 
-// Handle /authorize with fixed client ID for mcp-remote compatibility
-async function handleAuthorizeWithClientMapping(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+/**
+ * @deprecated Client ID mapping handler for authorization endpoint
+ * 
+ * Retained for reference but unused in current OAuth Provider architecture.
+ * Shows how to implement client ID aliasing for backward compatibility.
+ * Original purpose: Map static client IDs to dynamically registered ones.
+ * 
+ * @param request - Authorization request from client
+ * @param env - Cloudflare Worker environment bindings
+ * @param ctx - Execution context for async operations
+ * @returns Response with authorization redirect or error
+ */
+async function _handleAuthorizeWithClientMapping(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<Response> {
   try {
     const url = new URL(request.url);
     const requestedClientId = url.searchParams.get('client_id');
-    
+
     if (!requestedClientId) {
-      return new Response(JSON.stringify({
-        error: 'invalid_request',
-        error_description: 'Missing client_id parameter'
-      }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return new Response(
+        JSON.stringify({
+          error: 'invalid_request',
+          error_description: 'Missing client_id parameter',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
     }
 
-    console.log(`Authorization request for client_id: ${requestedClientId}`);
-    
-    // Get the actual registered client ID
+    /** Get the actual registered client ID */
     const actualClientId = await env.CONFIG_KV.get(`static_client_actual:${MCP_CLIENT_ID}`);
-    
-    // If the requested client ID is already our registered static client, proceed normally
+
+    /** If the requested client ID is already the registered static client, proceed normally */
     if (requestedClientId === actualClientId) {
-      console.log(`Client ID ${requestedClientId} is already the registered static client, proceeding normally`);
       return await createOAuthProvider(env).fetch(request, env, ctx);
     }
-    
-    // If we don't have a static client registered yet, register one
+
+    /** If no static client registered yet, register one */
     if (!actualClientId) {
-      console.log(`Registering static MCP client: ${MCP_CLIENT_ID}`);
-      
-      // Register our static client once
+      /** Register static client once for mcp-remote compatibility */
       const registerRequest = new Request(`${url.origin}/register`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           client_name: 'Microsoft 365 MCP Static Client',
           redirect_uris: [],
           grant_types: ['authorization_code'],
           response_types: ['code'],
-          token_endpoint_auth_method: 'none'
-        })
+          token_endpoint_auth_method: 'none',
+        }),
       });
-      
+
       const registerResponse = await createOAuthProvider(env).fetch(registerRequest, env, ctx);
-      
+
       if (registerResponse.status === 201) {
-        const registrationResult = await registerResponse.json() as any;
+        const registrationResult = (await registerResponse.json()) as any;
         const newActualClientId = registrationResult.client_id;
-        
+
         // Store the actual client ID for future use
         await env.CONFIG_KV.put(`static_client_actual:${MCP_CLIENT_ID}`, newActualClientId);
-        
-        console.log(`Registered static MCP client: ${MCP_CLIENT_ID} -> ${newActualClientId}`);
-        
-        // Now use the newly registered client ID
-        console.log(`Using static MCP client: ${requestedClientId} -> ${newActualClientId}`);
-        
-        // Create a new request with the actual registered client ID
+
+        /** Create a new request with the actual registered client ID */
         const mappedUrl = new URL(request.url);
         mappedUrl.searchParams.set('client_id', newActualClientId);
-        
+
         const mappedRequest = new Request(mappedUrl.toString(), {
           method: request.method,
           headers: request.headers,
-          body: request.body
+          body: request.body,
         });
-        
+
         return await createOAuthProvider(env).fetch(mappedRequest, env, ctx);
       } else {
-        console.error('Failed to register static client:', await registerResponse.text());
-        return new Response(JSON.stringify({
-          error: 'server_error',
-          error_description: 'Failed to register MCP client'
-        }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return new Response(
+          JSON.stringify({
+            error: 'server_error',
+            error_description: 'Failed to register MCP client',
+          }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
       }
     }
+
+    /** Static client registered - map requested client ID to actual registration */
     
-    // We have a static client registered, map the requested client ID to it
-    console.log(`Using static MCP client: ${requestedClientId} -> ${actualClientId}`);
-    
-    // Create a new request with the actual registered client ID
+    /** Create new request with actual registered client ID */
     const mappedUrl = new URL(request.url);
     mappedUrl.searchParams.set('client_id', actualClientId);
-    
+
     const mappedRequest = new Request(mappedUrl.toString(), {
       method: request.method,
       headers: request.headers,
-      body: request.body
+      body: request.body,
     });
-    
-    // Process the authorization request with the mapped client ID
+
+    /** Process authorization request with mapped client ID */
     return await createOAuthProvider(env).fetch(mappedRequest, env, ctx);
-    
   } catch (error: any) {
-    console.error('Authorization error:', error);
-    return new Response(JSON.stringify({
-      error: 'server_error',
-      error_description: error.message || 'Authorization failed'
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return new Response(
+      JSON.stringify({
+        error: 'server_error',
+        error_description: error.message || 'Authorization failed',
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
   }
 }
 
 
-// MCP Agent will be mounted per-request to avoid binding issues
-
-// Handle /token with static client ID mapping for mcp-remote compatibility  
-async function handleTokenWithClientMapping(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+/**
+ * @deprecated Client ID mapping handler for token endpoint
+ * 
+ * Retained for reference but unused in current OAuth Provider architecture.
+ * Shows how to handle token requests with client ID translation.
+ * Original purpose: Support token exchange with static client IDs.
+ * 
+ * @param request - Token exchange request from client
+ * @param env - Cloudflare Worker environment bindings  
+ * @param ctx - Execution context for async operations
+ * @returns Response with OAuth tokens or error
+ */
+async function _handleTokenWithClientMapping(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<Response> {
   try {
-    console.log('=== TOKEN EXCHANGE DEBUG ===');
-    console.log('Request method:', request.method);
-    console.log('Request URL:', request.url);
-    console.log('Request headers:', Object.fromEntries(request.headers.entries()));
-    
-    // Check content type
-    const contentType = request.headers.get('content-type');
-    console.log('Content-Type:', contentType);
-    
-    // Parse the form data to get client_id
+    /** Parse form data to extract client_id */
     const formData = await request.clone().formData();
-    console.log('Form data entries:');
-    for (const [key, value] of formData.entries()) {
-      console.log(`  ${key}: ${key === 'client_secret' ? '[REDACTED]' : value}`);
-    }
-    
+
     const requestedClientId = formData.get('client_id') as string;
-    
+
     if (!requestedClientId) {
-      console.log('Token request missing client_id, using default MCP client_id');
-      // For mcp-remote compatibility, use the expected client_id
+      /** Default to MCP_CLIENT_ID for mcp-remote compatibility */
       const defaultClientId = MCP_CLIENT_ID;
-      
-      // Create new form data with default client ID
+
+      /** Create new form data with default client ID */
       const newFormData = new FormData();
       for (const [key, value] of formData.entries()) {
         newFormData.append(key, value as string);
       }
       newFormData.append('client_id', defaultClientId);
-      
-      // Create a new request with the default client ID
+
+      /** Create new request with default client ID */
       const mappedRequest = new Request(request.url, {
         method: request.method,
         headers: request.headers,
-        body: newFormData
+        body: newFormData,
       });
-      
-      console.log('Using default client_id for token exchange:', defaultClientId);
+
       return await createOAuthProvider(env).fetch(mappedRequest, env, ctx);
     }
-    
-    console.log(`Token request for client_id: ${requestedClientId}`);
-    
-    // Get the actual registered client ID for our static MCP client
+
+    /** Retrieve actual registered client ID for static MCP client */
     const actualClientId = await env.CONFIG_KV.get(`static_client_actual:${MCP_CLIENT_ID}`);
-    
-    // If the requested client ID is already our registered static client, proceed normally
+
+    /** If requesting client matches registered static client, proceed with standard flow */
     if (requestedClientId === actualClientId) {
-      console.log(`Token client ID ${requestedClientId} is already the registered static client, proceeding normally`);
       return await createOAuthProvider(env).fetch(request, env, ctx);
     }
-    
-    // If we have a static client registered, map to it
+
+    /** Map to registered static client if available */
     if (actualClientId && requestedClientId !== actualClientId) {
-      console.log(`Using static MCP client for token: ${requestedClientId} -> ${actualClientId}`);
-      
-      // Create new form data with actual client ID
+      /** Create new form data with actual client ID */
       const newFormData = new FormData();
       for (const [key, value] of formData.entries()) {
         if (key === 'client_id') {
@@ -395,199 +422,97 @@ async function handleTokenWithClientMapping(request: Request, env: Env, ctx: Exe
           newFormData.append(key, value as string);
         }
       }
-      
+
       // Create a new request with the actual client ID
       const mappedRequest = new Request(request.url, {
         method: request.method,
         headers: request.headers,
-        body: newFormData
+        body: newFormData,
       });
-      
+
       return await createOAuthProvider(env).fetch(mappedRequest, env, ctx);
     }
-    
-    // If no mapping needed, proceed normally
+
+    /** Proceed with standard token exchange for non-mapped clients */
     return await createOAuthProvider(env).fetch(request, env, ctx);
-    
   } catch (error: any) {
-    console.error('Token exchange error:', error);
-    return new Response(JSON.stringify({
-      error: 'server_error',
-      error_description: error.message || 'Token exchange failed'
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return new Response(
+      JSON.stringify({
+        error: 'server_error',
+        error_description: error.message || 'Token exchange failed',
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
   }
 }
 
-// Handle MCP over SSE for Claude Desktop
-async function handleSSEMcp(request: Request, env: Env): Promise<Response> {
-  console.log('Setting up SSE MCP connection');
-  
-  // Create a streaming response for SSE
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  const encoder = new TextEncoder();
-  
-  // Start SSE connection
-  const sseResponse = new Response(readable, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization'
-    }
-  });
-  
-  // Handle the MCP connection asynchronously
-  handleMCPConnection(writer, encoder, env).catch(console.error);
-  
-  return sseResponse;
-}
-
-// Handle MCP protocol over SSE
-async function handleMCPConnection(writer: WritableStreamDefaultWriter, encoder: TextEncoder, env: Env) {
-  try {
-    console.log('Starting MCP handshake over SSE');
-    
-    // Wait a moment for client to be ready
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Send server info (initialize response)
-    const serverInfo = {
-      jsonrpc: '2.0',
-      id: 1,
-      result: {
-        protocolVersion: '2024-11-05',
-        capabilities: {
-          tools: {},
-          resources: {},
-          prompts: {},
-          logging: {}
-        },
-        serverInfo: {
-          name: 'Microsoft 365 MCP Server',
-          version: '0.3.0'
-        }
-      }
-    };
-    
-    await writer.write(encoder.encode(`data: ${JSON.stringify(serverInfo)}\n\n`));
-    
-    // Send tools list
-    const toolsList = {
-      jsonrpc: '2.0',
-      id: 2,
-      result: {
-        tools: [
-          {
-            name: 'read_emails',
-            description: 'Read emails from Microsoft Outlook',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                folder: { type: 'string', description: 'Email folder (inbox, sent, drafts)' },
-                limit: { type: 'number', description: 'Number of emails to retrieve' }
-              }
-            }
-          },
-          {
-            name: 'send_email',
-            description: 'Send an email via Microsoft Outlook', 
-            inputSchema: {
-              type: 'object',
-              properties: {
-                to: { type: 'string', description: 'Recipient email address' },
-                subject: { type: 'string', description: 'Email subject' },
-                body: { type: 'string', description: 'Email body' }
-              },
-              required: ['to', 'subject', 'body']
-            }
-          }
-        ]
-      }
-    };
-    
-    await writer.write(encoder.encode(`data: ${JSON.stringify(toolsList)}\n\n`));
-    
-    console.log('MCP handshake completed - sent server info and tools list');
-    
-    // Keep connection alive with periodic pings
-    const pingInterval = setInterval(async () => {
-      try {
-        const pingMessage = `data: ${JSON.stringify({ type: 'ping', timestamp: Date.now() })}\n\n`;
-        await writer.write(encoder.encode(pingMessage));
-      } catch (error) {
-        console.error('SSE ping failed:', error);
-        clearInterval(pingInterval);
-        writer.close();
-      }
-    }, 30000); // Ping every 30 seconds
-    
-    // Handle connection cleanup
-    setTimeout(() => {
-      console.log('Closing MCP SSE connection after timeout');
-      clearInterval(pingInterval);
-      writer.close();
-    }, 300000); // Close after 5 minutes
-    
-  } catch (error) {
-    console.error('MCP SSE connection error:', error);
-    writer.close();
-  }
-}
-
-// Create OAuth provider factory function to capture environment
+/**
+ * @deprecated OAuth Provider factory with environment closure
+ * 
+ * Unused in current architecture where OAuth Provider is instantiated inline.
+ * Retained for reference showing alternative configuration pattern that could
+ * be useful for testing or multiple provider instances.
+ * 
+ * @param env - Cloudflare Worker environment bindings
+ * @returns Configured OAuthProvider instance with Microsoft handlers
+ */
 function createOAuthProvider(env: Env) {
   return new OAuthProvider({
-  // Protect API endpoints - token endpoint needs special handling for client ID mapping
-  apiRoute: [],  // Don't protect any routes, handle mapping at the defaultHandler level
-  apiHandler: { fetch: async () => new Response('Not used', { status: 404 }) }, // Not used
+    /** API protection disabled - all routing handled via apiHandlers and defaultHandler */
+    apiRoute: [],
+    apiHandler: { fetch: async () => new Response('Not used', { status: 404 }) },
 
-  // Default handler for OAuth flows - route to MicrosoftHandler
-  defaultHandler: MicrosoftHandler as any,
+    /** MicrosoftHandler processes OAuth 2.1 + PKCE authorization and callback flows */
+    defaultHandler: MicrosoftHandler as any,
 
-  // OAuth endpoints
-  authorizeEndpoint: '/authorize',
-  tokenEndpoint: '/token',
-  clientRegistrationEndpoint: '/register',
-  
-  // Enable dynamic client registration for Claude Desktop support
-  disallowPublicClientRegistration: false,
+    /** Standard OAuth 2.1 endpoint configuration */
+    authorizeEndpoint: '/authorize',
+    tokenEndpoint: '/token',
+    clientRegistrationEndpoint: '/register',
 
-  // Supported scopes
-  scopesSupported: [
-    'User.Read',
-    'Mail.Read',
-    'Mail.ReadWrite',
-    'Mail.Send',
-    'Calendars.Read',
-    'Calendars.ReadWrite',
-    'Contacts.ReadWrite',
-    'OnlineMeetings.ReadWrite',
-    'ChannelMessage.Send',
-    'Team.ReadBasic.All',
-  ],
+    /** DCR (Dynamic Client Registration) enabled for MCP client automatic setup */
+    disallowPublicClientRegistration: false,
 
-  // Token exchange callback - integrates Microsoft tokens into OAuth flow
-  tokenExchangeCallback: async (options: any) => {
-    // Use captured environment from closure
+    /** Microsoft Graph API permission scopes required for Microsoft 365 operations */
+    scopesSupported: [
+      'User.Read',
+      'Mail.Read',
+      'Mail.ReadWrite',
+      'Mail.Send',
+      'Calendars.Read',
+      'Calendars.ReadWrite',
+      'Contacts.Read',
+      'Contacts.ReadWrite',
+      'People.Read',
+      'People.Read.All',
+      'OnlineMeetings.ReadWrite',
+      'ChannelMessage.Send',
+      'Team.ReadBasic.All',
+      'offline_access',
+    ],
 
-    if (options.grantType === 'authorization_code') {
-      // The MicrosoftHandler has stored the Microsoft authorization code in props
-      const microsoftAuthCode = options.props.microsoftAuthCode;
-      const redirectUri = options.props.microsoftRedirectUri;
+    // Token exchange callback - integrates Microsoft tokens into OAuth flow
+    tokenExchangeCallback: async (options: any) => {
+      // Use captured environment from closure
 
-      if (!microsoftAuthCode) {
-        throw new Error('No Microsoft authorization code available');
-      }
+      if (options.grantType === 'authorization_code') {
+        /** Extract Microsoft authorization code stored by MicrosoftHandler in OAuth props */
+        const microsoftAuthCode = options.props.microsoftAuthCode;
+        const redirectUri = options.props.microsoftRedirectUri;
 
-      try {
-        // Exchange Microsoft authorization code for access tokens
-        const microsoftTokens = await exchangeMicrosoftTokens(microsoftAuthCode, env, redirectUri);
+        if (!microsoftAuthCode) {
+          throw new Error('No Microsoft authorization code available');
+        }
+
+        /** Execute Microsoft OAuth 2.1 token exchange using authorization code flow */
+        const microsoftTokens = await exchangeMicrosoftTokens(
+          microsoftAuthCode,
+          env,
+          redirectUri
+        );
 
         return {
           // Store Microsoft access token in the access token props for the MCP agent
@@ -605,21 +530,16 @@ function createOAuthProvider(env: Env) {
           // Match Microsoft token TTL
           accessTokenTTL: microsoftTokens.expires_in,
         };
-      } catch (error) {
-        console.error('Microsoft token exchange failed:', error);
-        throw error;
-      }
-    }
-
-    if (options.grantType === 'refresh_token') {
-      // Refresh Microsoft tokens using stored refresh token
-      const refreshToken = options.props.microsoftRefreshToken;
-
-      if (!refreshToken) {
-        throw new Error('No Microsoft refresh token available');
       }
 
-      try {
+      if (options.grantType === 'refresh_token') {
+        // Refresh Microsoft tokens using stored refresh token
+        const refreshToken = options.props.microsoftRefreshToken;
+
+        if (!refreshToken) {
+          throw new Error('No Microsoft refresh token available');
+        }
+
         const microsoftTokens = await refreshMicrosoftTokens(refreshToken, env);
 
         return {
@@ -635,503 +555,368 @@ function createOAuthProvider(env: Env) {
           },
           accessTokenTTL: microsoftTokens.expires_in,
         };
-      } catch (error) {
-        console.error('Microsoft token refresh failed:', error);
-        throw error;
       }
-    }
 
-    // For other grant types, return unchanged
-    return {};
-  },
+      // For other grant types, return unchanged
+      return {};
+    },
   });
 }
 
-// Unified handler supporting GET, POST, and WebSocket on single /sse endpoint
-const unifiedHandler = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    
-    // DEBUG: Log all requests to see what we're getting
-    console.log(`=== REQUEST DEBUG ===`);
-    console.log(`Method: ${request.method}`);
-    console.log(`URL: ${request.url}`);
-    console.log(`Pathname: ${url.pathname}`);
-    
-    // Route 1: MCP endpoint - hybrid handler for multiple protocols
-    if (url.pathname === '/sse' || url.pathname.startsWith('/sse/')) {
-      return handleHybridMcp(request, env, ctx);
-    }
-    
-    // Route 2: Health check
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({
-        status: 'healthy',
-        service: 'Microsoft 365 MCP Server - Unified Endpoint',
-        timestamp: new Date().toISOString(),
-        architecture: 'Single /sse endpoint with multi-protocol support',
-        protocols: {
-          'GET': 'SSE validation for Claude Desktop',
-          'POST': 'Direct JSON-RPC for testing',
-          'WebSocket': 'Full MCP protocol with OAuth'
-        },
-        endpoints: {
-          'mcp-server': '/sse (all protocols)',
-          'health': '/health',
-          'authorization': '/authorize'
-        },
-        documentation: 'https://github.com/nikolanovoselec/m365-mcp-server'
-      }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    // Route 3: Service info
-    if (url.pathname === '/' || url.pathname === '/info') {
-      return new Response(JSON.stringify({
-        service: 'Microsoft 365 MCP Server',
-        version: '0.3.0',
-        architecture: 'Unified Endpoint',
-        configurations: {
-          claude_desktop_direct: {
-            url: `${env.PROTOCOL}://${env.WORKER_DOMAIN}/sse`,
-            description: 'Direct web connector'
-          },
-          mcp_remote: {
-            command: 'npx',
-            args: ['mcp-remote', `${env.PROTOCOL}://${env.WORKER_DOMAIN}/sse`],
-            description: 'Traditional MCP-remote configuration'
-          }
-        },
-        note: 'Both configurations use the same unified endpoint with automatic protocol detection',
-        documentation: 'https://github.com/nikolanovoselec/m365-mcp-server'
-      }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    // Route 4: OAuth Server Metadata Discovery (for Claude Desktop native remote MCP)
-    if (url.pathname === '/.well-known/oauth-authorization-server') {
-      console.log('OAuth server metadata discovery request');
-      return handleOAuthMetadata(request, env);
-    }
-    
-    // Route 5: All other OAuth routes - delegate to OAuth provider (client initialization happens in handlers)
-    console.log(`OAuth route: ${url.pathname}`);
-    
-    const oauthProvider = createOAuthProvider(env);
-    return oauthProvider.fetch(request, env, ctx);
-  }
-};
+/**
+ * API Token Mode detection for MCP protocol compliance
+ * 
+ * REQUIRED for unauthenticated discovery phase where MCP clients
+ * call tools/list before user authentication to enumerate available tools
+ * 
+ * Token Format Logic:
+ * - OAuth tokens: 3-part colon-separated format (header:payload:signature) per JWT spec
+ * - API tokens: Any other format (simple strings, UUIDs) trigger discovery mode
+ * - This distinction allows tools enumeration without full authentication
+ * 
+ * WHY THIS EXISTS:
+ * MCP clients need to show available capabilities before asking users to authenticate.
+ * This allows users to make informed decisions about granting permissions.
+ * 
+ * @param req - HTTP request to examine for token format
+ * @returns true if request should use discovery mode, false for authenticated mode
+ */
+async function isApiTokenRequest(req: Request): Promise<boolean> {
+  const url = new URL(req.url);
 
-// Handle OAuth Server Metadata Discovery (RFC8414) for Claude Desktop
-async function handleOAuthMetadata(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
-  
-  const metadata = {
-    issuer: baseUrl,
-    authorization_endpoint: `${baseUrl}/authorize`,
-    token_endpoint: `${baseUrl}/token`, 
-    registration_endpoint: `${baseUrl}/register`,
-    grant_types_supported: [
-      "authorization_code",
-      "refresh_token"
-    ],
-    response_types_supported: [
-      "code"
-    ],
-    code_challenge_methods_supported: [
-      "S256"
-    ],
-    token_endpoint_auth_methods_supported: [
-      "none"
-    ],
-    scopes_supported: [
-      "claudeai"
-    ]
-  };
-  
-  return new Response(JSON.stringify(metadata, null, 2), {
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'public, max-age=3600',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    }
-  });
+  /** Skip API Token Mode for OAuth endpoints to prevent authentication loop */
+  if (!url.pathname.startsWith('/mcp') && !url.pathname.startsWith('/sse')) {
+    return false;
+  }
+
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    /** Missing Authorization header indicates unauthenticated discovery request */
+    return true;
+  }
+
+  const [type, token] = authHeader.split(' ');
+  if (type !== 'Bearer') return false;
+
+  /**
+   * Token Format Detection:
+   * - OAuth tokens: 3-part colon format (header:payload:signature) per JWT spec
+   * - API tokens: Any other format (simple strings, UUIDs, etc.)
+   * 
+   * This distinction allows the server to differentiate between:
+   * - Authenticated requests (OAuth tokens) requiring full validation
+   * - Discovery requests (API tokens) allowing tool enumeration without auth
+   */
+  const codeParts = token.split(':');
+  return codeParts.length !== 3;
 }
 
-// Handle unified MCP endpoint with GET, POST, and WebSocket support
-async function handleUnifiedMcp(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  
-  // DEBUG: Log all headers to understand what we're receiving
-  const allHeaders = Object.fromEntries(request.headers.entries());
-  console.log('Request details:', {
-    method: request.method,
-    url: request.url,
-    headers: allHeaders
-  });
-  
-  // Protocol 1: WebSocket upgrade requests (mcp-remote and OAuth-capable clients)
-  // Check this FIRST because WebSocket upgrades are also GET requests
-  const upgradeHeader = request.headers.get('Upgrade');
-  const connectionHeader = request.headers.get('Connection');
-  const webSocketKey = request.headers.get('Sec-WebSocket-Key');
-  const webSocketVersion = request.headers.get('Sec-WebSocket-Version');
-  
-  console.log('WebSocket check:', { upgradeHeader, connectionHeader, webSocketKey, webSocketVersion });
-  
-  // All WebSocket requests: delegate to OAuth provider (handles WebSocket natively)
-  if ((upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') ||
-      (connectionHeader && connectionHeader.toLowerCase().includes('upgrade')) ||
-      (webSocketKey && webSocketVersion)) {
-    console.log('WebSocket upgrade detected - delegating to OAuth provider with native WebSocket support');
-    const oauthProvider = createOAuthProvider(env);
-    return oauthProvider.fetch(request, env, ctx);
-  }
-  
-  // Protocol 2: GET requests with SSE headers
-  if (request.method === 'GET') {
-    const acceptHeader = request.headers.get('Accept');
-    if (acceptHeader && acceptHeader.includes('text/event-stream')) {
-      // All SSE requests get the same validation response
-      // mcp-remote will then switch to WebSocket for the actual MCP protocol
-      console.log('SSE validation request (Claude Desktop or mcp-remote)');
-      return handleSseValidation(request, env);
-    }
-    return new Response('GET requests must include Accept: text/event-stream for SSE or Upgrade: websocket', { status: 400 });
-  }
-  
-  // Protocol 3: POST requests (Direct JSON-RPC for testing/debugging)
-  if (request.method === 'POST') {
-    return handleDirectJsonRpc(request, env);
-  }
-  
-  return new Response('Unsupported method - Use GET (SSE), POST (JSON-RPC), or WebSocket upgrade', { status: 405 });
+/**
+ * Handle unauthenticated discovery requests in API Token Mode
+ * 
+ * Creates temporary Durable Object instance for tool enumeration
+ * Session is ephemeral and not persisted after discovery phase
+ * 
+ * PERFORMANCE: Uses consistent 'discovery-session' ID to reuse Durable Object
+ * instance across discovery requests, reducing cold start overhead
+ * 
+ * @param request - Original HTTP request to forward to MCP Agent
+ * @param env - Cloudflare Worker environment bindings
+ * @param _ctx - Execution context (unused but required by signature)
+ * @returns Response from MCP Agent with available tools list
+ */
+async function handleApiTokenMode(
+  request: Request,
+  env: Env,
+  _ctx: ExecutionContext
+): Promise<Response> {
+  /** 
+   * Direct Durable Object invocation bypasses OAuth authentication
+   * MicrosoftMCPAgent.fetch() contains logic to handle discovery without props
+   * Session name 'discovery-session' ensures consistent instance reuse
+   */
+  const id = env.MCP_OBJECT.idFromName('discovery-session');
+  const obj = env.MCP_OBJECT.get(id);
+  return await obj.fetch(request);
 }
 
-// Handle SSE validation for Claude Desktop web connector
-async function handleSseValidation(request: Request, env: Env): Promise<Response> {
-  console.log('Claude Desktop SSE validation - returning SSE headers');
-  
-  return new Response('', {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Accept, Upgrade, Connection'
-    }
-  });
-}
-
-// Handle direct JSON-RPC requests for testing
-async function handleDirectJsonRpc(request: Request, env: Env): Promise<Response> {
+/**
+ * @deprecated JSON-RPC method parser for debugging purposes
+ * 
+ * Unused in current architecture but retained for debugging
+ * Can be used to inspect JSON-RPC methods in request bodies
+ * 
+ * @param request - HTTP request containing JSON-RPC payload
+ * @returns Promise resolving to method name or null if parsing fails
+ */
+async function _parseJsonRpcMethod(request: Request): Promise<string | null> {
   try {
-    const body = await request.text();
-    const message = JSON.parse(body);
-    
-    console.log(`Received POST method: ${message.method}`);
-    
-    if (!message.method) {
-      return new Response(JSON.stringify({
-        jsonrpc: '2.0',
-        id: message.id || null,
-        error: { code: -32600, message: 'Invalid request - missing method' }
-      }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
+    const body = await request.clone().text();
+    if (!body) return null;
+    const jsonRpc = JSON.parse(body);
+    return jsonRpc.method || null;
+  } catch {
+    return null;
+  }
+}
+
+
+// ============================================================================
+// MAIN WORKER EXPORT
+// ============================================================================
+
+/**
+ * Cloudflare Worker fetch handler - Entry point for all requests
+ * 
+ * PROCESSING ORDER:
+ * 1. API Token Mode check (unauthenticated discovery)
+ * 2. OAuth Provider processing (authentication and token management)
+ * 3. MCP Agent invocation (protocol handling)
+ */
+export default {
+  fetch: async (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
+    const _url = new URL(request.url);
+
+    /**
+     * API Token Mode must be checked before OAuth Provider
+     * to prevent authentication requirements on discovery requests
+     * 
+     * PERFORMANCE CONSIDERATIONS:
+     * - API Token Mode reuses 'discovery-session' Durable Object ID
+     * - This prevents cold starts on every discovery request
+     * - Trade-off: All discovery requests share same DO instance
+     * - Consider implementing LRU cache for multiple discovery sessions
+     * 
+     * OPTIMIZATION OPPORTUNITIES:
+     * - Cache discovery responses in KV with 5-minute TTL
+     * - Implement connection pooling for multiple clients
+     * - Use Durable Object alarms for session cleanup
+     * - Consider Workers Analytics Engine for metrics
+     */
+    if (await isApiTokenRequest(request)) {
+      return await handleApiTokenMode(request, env, ctx);
     }
+
+    // ============================================================================
+    // OAUTH PROVIDER CONFIGURATION
+    // ============================================================================
     
-    // Allow MCP handshake methods without authentication - using slash notation for Claude Desktop compatibility
-    const handshakeMethods = ['initialize', 'initialized', 'tools/list', 'resources/list', 'prompts/list', 'notifications/initialized', 'notifications/cancelled'];
-    
-    if (handshakeMethods.includes(message.method)) {
-      console.log(`Direct JSON-RPC handshake: ${message.method}`);
-      
-      switch (message.method) {
-        case 'initialize':
-          return new Response(JSON.stringify({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: {
-              protocolVersion: '2024-11-05',
-              serverInfo: {
-                name: 'microsoft-365-mcp',
-                version: '0.3.0'
-              },
-              capabilities: {
-                tools: {},
-                resources: {},
-                prompts: {}
+    /**
+     * OAuth Provider configuration with custom /sse handler
+     * 
+     * WHY THIS ARCHITECTURE:
+     * 1. Cloudflare defaults to HTTP/2, preventing WebSocket upgrades
+     * 2. MCP Agent requires WebSocket-like persistent connections
+     * 3. OAuth Provider wrapper enables SSE transport as WebSocket alternative
+     * 4. Props passing mechanism bridges OAuth context to MCP Agent
+     * 
+     * This is NOT over-engineering but a necessary adaptation to platform constraints.
+     */
+    return new OAuthProvider({
+      /**
+       * CRITICAL INTEGRATION POINT: /sse endpoint handler
+       * 
+       * Purpose: Bridge OAuth Provider props to MCP Agent
+       * - Extracts Microsoft tokens from OAuth context
+       * - Passes tokens via modified ExecutionContext
+       * - Enables Graph API calls within MCP tools
+       * 
+       * Note: 404 on initial POST is INTENTIONAL
+       * Signals client to authenticate before session creation
+       */
+      apiHandlers: {
+        '/sse': {
+          fetch: async (request: Request, env: unknown, ctx: ExecutionContext) => {
+            const typedEnv = env as Env;
+            
+            /** 
+             * CRITICAL: OAuth Provider stores authenticated user props in ExecutionContext.
+             * These props contain Microsoft tokens needed for Graph API calls.
+             * Empty props indicate unauthenticated state (intentional behavior).
+             */
+
+            const oauthProps = (ctx as any).props;
+
+            if (oauthProps) {
+
+              try {
+                /**
+                 * Static serveSSE method from agents library creates Durable Object instances
+                 * Props passed via modified ExecutionContext become available as this.props in agent
+                 */
+                const propsContext = {
+                  ...ctx,
+                  props: oauthProps,
+                };
+
+                const response = await MicrosoftMCPAgent.serveSSE('/sse').fetch(
+                  request,
+                  typedEnv,
+                  propsContext as ExecutionContext
+                );
+
+                return response;
+              } catch (error) {
+                return new Response(
+                  JSON.stringify({
+                    error: 'Internal server error in OAuth API handler',
+                    details: (error as Error).message,
+                  }),
+                  {
+                    status: 500,
+                    headers: { 'Content-Type': 'application/json' },
+                  }
+                );
+              }
+            } else {
+              /**
+               * INTENTIONAL 404 BEHAVIOR:
+               * 
+               * Returns 404 when no OAuth props exist (unauthenticated)
+               * This is NOT an error but a signal to the client:
+               * - No authenticated session exists yet
+               * - Client should initiate OAuth flow
+               * - Prevents unnecessary Durable Object creation
+               * 
+               * Performance optimization: Quick rejection without resource allocation
+               */
+              try {
+                const staticResponse = await MicrosoftMCPAgent.serveSSE('/sse').fetch(
+                  request,
+                  typedEnv,
+                  ctx
+                );
+                return staticResponse;
+              } catch (staticError) {
+                return new Response(
+                  JSON.stringify({
+                    error: 'SSE transport initialization failed',
+                    details: (staticError as Error).message,
+                  }),
+                  {
+                    status: 500,
+                    headers: { 'Content-Type': 'application/json' },
+                  }
+                );
               }
             }
-          }), {
-            headers: { 'Content-Type': 'application/json' }
-          });
-          
-        case 'list_tools':
-          return new Response(JSON.stringify({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: {
-              tools: [
-                {
-                  name: 'sendEmail',
-                  description: 'Send an email via Outlook',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      to: { type: 'string', description: 'Recipient email address' },
-                      subject: { type: 'string', description: 'Email subject' },
-                      body: { type: 'string', description: 'Email body content' },
-                      contentType: { type: 'string', enum: ['text', 'html'], default: 'html' }
-                    },
-                    required: ['to', 'subject', 'body']
-                  }
-                },
-                {
-                  name: 'getEmails',
-                  description: 'Get recent emails',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      count: { type: 'number', maximum: 50, default: 10 },
-                      folder: { type: 'string', default: 'inbox' }
-                    }
-                  }
-                },
-                {
-                  name: 'getCalendarEvents', 
-                  description: 'Get calendar events',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      days: { type: 'number', maximum: 30, default: 7 }
-                    }
-                  }
-                },
-                {
-                  name: 'authenticate',
-                  description: 'Get authentication URL for Microsoft 365',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {}
-                  }
-                }
-              ]
-            }
-          }), {
-            headers: { 'Content-Type': 'application/json' }
-          });
-          
+          },
+        },
+      },
+      /** MicrosoftHandler manages OAuth 2.1 + PKCE authorization and callback */
+      /** OAuth 2.1 + PKCE flow handler for Microsoft authentication */
+      defaultHandler: MicrosoftHandler as any,
+      /** OAuth 2.1 standard endpoints */
+      authorizeEndpoint: '/authorize',
+      tokenEndpoint: '/token',
+      /** DCR endpoint for automatic client registration */
+      clientRegistrationEndpoint: '/register',
 
-        case 'tools/list':
-          return new Response(JSON.stringify({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: {
-              tools: [
-                {
-                  name: 'sendEmail',
-                  description: 'Send an email via Outlook',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      to: { type: 'string', description: 'Recipient email address' },
-                      subject: { type: 'string', description: 'Email subject' },
-                      body: { type: 'string', description: 'Email body content' },
-                      contentType: { type: 'string', enum: ['text', 'html'], default: 'html' }
-                    },
-                    required: ['to', 'subject', 'body']
-                  }
-                },
-                {
-                  name: 'getEmails',
-                  description: 'Get recent emails',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      count: { type: 'number', maximum: 50, default: 10 },
-                      folder: { type: 'string', default: 'inbox' }
-                    }
-                  }
-                },
-                {
-                  name: 'searchEmails',
-                  description: 'Search emails',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      query: { type: 'string', description: 'Search query' },
-                      count: { type: 'number', maximum: 50, default: 10, description: 'Number of results' }
-                    },
-                    required: ['query']
-                  }
-                },
-                {
-                  name: 'getCalendarEvents',
-                  description: 'Get calendar events',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      days: { type: 'number', maximum: 30, default: 7 }
-                    }
-                  }
-                },
-                {
-                  name: 'createCalendarEvent',
-                  description: 'Create calendar event',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      subject: { type: 'string', description: 'Event title' },
-                      start: { type: 'string', description: 'Start date/time (ISO format)' },
-                      end: { type: 'string', description: 'End date/time (ISO format)' },
-                      body: { type: 'string', description: 'Event description' },
-                      attendees: { type: 'string', description: 'Comma-separated email addresses' }
-                    },
-                    required: ['subject', 'start', 'end']
-                  }
-                },
-                {
-                  name: 'sendTeamsMessage',
-                  description: 'Send Teams message',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      chatId: { type: 'string', description: 'Teams chat ID' },
-                      message: { type: 'string', description: 'Message content' }
-                    },
-                    required: ['chatId', 'message']
-                  }
-                },
-                {
-                  name: 'createTeamsMeeting',
-                  description: 'Create Teams meeting',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      subject: { type: 'string', description: 'Meeting title' },
-                      start: { type: 'string', description: 'Start date/time (ISO format)' },
-                      end: { type: 'string', description: 'End date/time (ISO format)' },
-                      attendees: { type: 'string', description: 'Comma-separated email addresses' }
-                    },
-                    required: ['subject', 'start', 'end']
-                  }
-                },
-                {
-                  name: 'getContacts',
-                  description: 'Get contacts',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {
-                      count: { type: 'number', maximum: 50, default: 10, description: 'Number of contacts' }
-                    }
-                  }
-                },
-                {
-                  name: 'authenticate',
-                  description: 'Get authentication URL for Microsoft 365',
-                  inputSchema: {
-                    type: 'object',
-                    properties: {}
-                  }
-                }
-              ]
-            }
-          }), {
-            headers: { 'Content-Type': 'application/json' }
-          });
+      /** DCR (Dynamic Client Registration) enabled for MCP client automatic setup */
+      disallowPublicClientRegistration: false,
 
-        case 'resources/list':
-        case 'prompts/list':
-          return new Response(JSON.stringify({
-            jsonrpc: '2.0',
-            id: message.id,
-            result: { [message.method.split('/')[0]]: [] }
-          }), {
-            headers: { 'Content-Type': 'application/json' }
-          });
+      /** Complete set of Microsoft Graph API scopes for all supported operations */
+      scopesSupported: [
+        'User.Read',
+        'Mail.Read',
+        'Mail.ReadWrite',
+        'Mail.Send',
+        'Calendars.Read',
+        'Calendars.ReadWrite',
+        'Contacts.Read',
+        'Contacts.ReadWrite',
+        'People.Read',
+        'People.Read.All',
+        'OnlineMeetings.ReadWrite',
+        'ChannelMessage.Send',
+        'Team.ReadBasic.All',
+        'offline_access',
+      ],
 
-        case 'initialized':
-        case 'notifications/initialized':
-        case 'notifications/cancelled':
-          // These are notifications that don't require responses
-          return new Response('', { status: 200 });
-          
-        default:
-          return new Response(JSON.stringify({
-            jsonrpc: '2.0',
-            id: message.id,
-            error: { code: -32601, message: 'Method not found' }
-          }), {
-            status: 404,
-            headers: { 'Content-Type': 'application/json' }
-          });
-      }
-    }
-    
-    // Tool calls require authentication
-    if (message.method === 'tools/call') {
-      const host = request.headers.get('host') || env.WORKER_DOMAIN;
-      
-      return new Response(JSON.stringify({
-        jsonrpc: '2.0',
-        id: message.id,
-        error: {
-          code: -32001,
-          message: 'Authentication required',
-          data: {
-            error: 'microsoft_oauth_required',
-            auth_url: `https://${host}/authorize`,
-            instructions: [
-              'Microsoft 365 authentication is required to use tools.',
-              'Please visit the auth_url to complete OAuth authentication.',
-              'After authentication, tools will be available for use.'
-            ]
+      /**
+       * Token exchange callback - critical integration point
+       * 
+       * PURPOSE:
+       * Bridges Cloudflare OAuth Provider tokens with Microsoft Graph tokens.
+       * This dual token architecture is REQUIRED because:
+       * 1. OAuth Provider manages client authentication and session
+       * 2. Microsoft Graph API requires Microsoft-specific access tokens
+       * 3. Tokens must be synchronized for proper authorization flow
+       * 
+       * FLOW:
+       * 1. OAuth Provider calls this after client authorization
+       * 2. Exchange Microsoft auth code for Graph API tokens
+       * 3. Store both token sets in props for MCP Agent access
+       */
+      tokenExchangeCallback: async (options: any) => {
+
+        if (options.grantType === 'authorization_code') {
+          /** Extract Microsoft authorization code stored by MicrosoftHandler in OAuth props */
+          const microsoftAuthCode = options.props.microsoftAuthCode;
+          const redirectUri = options.props.microsoftRedirectUri;
+
+          if (!microsoftAuthCode) {
+            throw new Error('No Microsoft authorization code available');
           }
+
+          /** Execute Microsoft OAuth 2.1 token exchange using authorization code flow */
+          const microsoftTokens = await exchangeMicrosoftTokens(
+            microsoftAuthCode,
+            env,
+            redirectUri
+          );
+
+          /** Token storage complete - now available in MCP Agent props */
+
+          return {
+            /**
+             * CRITICAL: Store ALL tokens in newProps (not accessTokenProps)
+             * This ensures tokens persist across requests and sessions
+             * Follows Cloudflare's OAuth Provider persistence pattern
+             */
+            newProps: {
+              ...options.props,
+              microsoftAccessToken: microsoftTokens.access_token,
+              microsoftTokenType: microsoftTokens.token_type,
+              microsoftScope: microsoftTokens.scope,
+              microsoftRefreshToken: microsoftTokens.refresh_token,
+            },
+            /** Token expiration from Microsoft (typically 3600 seconds for access tokens) */
+            accessTokenTTL: microsoftTokens.expires_in,
+          };
         }
-      }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    // Other methods
-    return new Response(JSON.stringify({
-      jsonrpc: '2.0',
-      id: message.id,
-      error: { code: -32601, message: 'Method not supported in direct mode' }
-    }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-  } catch (error) {
-    console.error('JSON-RPC parsing error:', error);
-    
-    return new Response(JSON.stringify({
-      jsonrpc: '2.0',
-      id: null,
-      error: { 
-        code: -32700, 
-        message: 'Parse error',
-        data: { details: error instanceof Error ? error.message : 'Unknown error' }
-      }
-    }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-}
 
+        if (options.grantType === 'refresh_token') {
+          /** Retrieve refresh token from previous authorization */
+          const refreshToken = options.props.microsoftRefreshToken;
 
-export default unifiedHandler;
+          if (!refreshToken) {
+            throw new Error('No Microsoft refresh token available');
+          }
 
-// Export Durable Object classes
-export { MicrosoftMCPAgent } from './microsoft-mcp-agent';
+          /** Execute token refresh flow with Microsoft OAuth 2.1 endpoint */
+          const microsoftTokens = await refreshMicrosoftTokens(refreshToken, env);
+
+          return {
+            /**
+             * Update all tokens including new access token and potentially new refresh token
+             * Microsoft may issue new refresh token; fallback to existing if not provided
+             */
+            newProps: {
+              ...options.props,
+              microsoftAccessToken: microsoftTokens.access_token,
+              microsoftTokenType: microsoftTokens.token_type,
+              microsoftScope: microsoftTokens.scope,
+              microsoftRefreshToken: microsoftTokens.refresh_token || refreshToken,
+            },
+            accessTokenTTL: microsoftTokens.expires_in,
+          };
+        }
+
+        throw new Error(`Unsupported grant type: ${options.grantType}`);
+      },
+
+      accessTokenTTL: 3600,
+    }).fetch(request, env, ctx);
+  },
+};

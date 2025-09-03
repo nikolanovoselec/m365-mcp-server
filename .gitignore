@@ -35,3 +35,29 @@ M365-MCP-SERVER.env
 .DS_Store
 Thumbs.db
 
+# Auto-generated files
+worker-configuration.d.ts
+
+# Backup and temporary files
+*.backup
+*.bak
+*.old
+*.tmp
+*~
+.#*
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Test coverage
+coverage/
+
+# Lock files (allow only one)
+package-lock.json
+yarn.lock
+
+# Keep npm for consistency
+!package-lock.json
+

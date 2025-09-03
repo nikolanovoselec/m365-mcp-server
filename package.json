@@ -4,13 +4,21 @@
   "description": "Microsoft 365 MCP Server for Cloudflare Workers",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "npm run validate && wrangler build",
+    "build:ci": "tsc",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run validate && wrangler deploy",
     "type-check": "tsc --noEmit",
-    "test": "vitest",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write .",
-    "lint": "tsc --noEmit"
+    "format:check": "prettier --check .",
+    "validate": "npm run type-check && npm run lint && npm run format:check",
+    "test": "vitest",
+    "clean": "rm -rf dist .wrangler worker-configuration.d.ts",
+    "prebuild": "npm run clean",
+    "precommit": "scripts/pre-commit.sh",
+    "setup-hooks": "ln -sf ../../scripts/pre-commit.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.0.6",

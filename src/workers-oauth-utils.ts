@@ -1,11 +1,37 @@
-// workers-oauth-utils.ts
+/**
+ * OAuth Utility Functions for Cloudflare Workers OAuth Provider
+ * 
+ * Handles client approval flow and cookie-based state management for
+ * OAuth 2.1 + PKCE authorization with Microsoft Identity Platform.
+ * 
+ * ARCHITECTURE:
+ * - Uses encrypted cookies for CSRF protection and state preservation
+ * - Implements HTML-based approval dialog for OAuth consent
+ * - Provides utilities for parsing OAuth redirect responses
+ * 
+ * SECURITY DESIGN:
+ * - HMAC signing prevents cookie tampering
+ * - HttpOnly flag prevents XSS access  
+ * - SameSite=Lax prevents CSRF attacks
+ * - 15-minute expiry limits exposure window
+ * - All sensitive data sanitized before rendering
+ * 
+ * TEMPLATE ARCHITECTURE:
+ * Inline CSS/HTML chosen over external assets for:
+ * - Zero external dependencies (security)
+ * - Consistent rendering across clients
+ * - Cloudflare Workers edge compatibility
+ * Consider extracting to external template if maintenance becomes complex.
+ */
 
-import type { AuthRequest, ClientInfo } from '@cloudflare/workers-oauth-provider'; // Adjust path if necessary
+import type { AuthRequest, ClientInfo } from '@cloudflare/workers-oauth-provider';
 
 const COOKIE_NAME = 'mcp-approved-clients';
 const ONE_YEAR_IN_SECONDS = 31536000;
 
-// --- Helper Functions ---
+// ============================================================================
+// COOKIE CONFIGURATION
+// ============================================================================
 
 /**
  * Encodes arbitrary data to a URL-safe base64 string.
@@ -15,11 +41,9 @@ const ONE_YEAR_IN_SECONDS = 31536000;
 function _encodeState(data: any): string {
   try {
     const jsonString = JSON.stringify(data);
-    // Use btoa for simplicity, assuming Worker environment supports it well enough
-    // For complex binary data, a Buffer/Uint8Array approach might be better
+    /** Base64 encoding for URL-safe state transmission */
     return btoa(jsonString);
   } catch (e) {
-    console.error('Error encoding state:', e);
     throw new Error('Could not encode state');
   }
 }
@@ -34,15 +58,24 @@ function decodeState<T = any>(encoded: string): T {
     const jsonString = atob(encoded);
     return JSON.parse(jsonString);
   } catch (e) {
-    console.error('Error decoding state:', e);
     throw new Error('Could not decode state');
   }
 }
 
+// ============================================================================
+// CRYPTOGRAPHIC UTILITIES
+// ============================================================================
+
 /**
- * Imports a secret key string for HMAC-SHA256 signing.
- * @param secret - The raw secret key string.
- * @returns A promise resolving to the CryptoKey object.
+ * Imports a secret key string for HMAC-SHA256 signing
+ * 
+ * SECURITY: Creates non-extractable CryptoKey to prevent key material exposure
+ * in JavaScript context. Key is only accessible via sign/verify operations.
+ * 
+ * @param secret - Raw secret key string (should be cryptographically random)
+ * @returns Promise resolving to CryptoKey for HMAC operations
+ * @throws Error if secret is undefined or empty
+ * @private
  */
 async function importKey(secret: string): Promise<CryptoKey> {
   if (!secret) {
@@ -53,8 +86,8 @@ async function importKey(secret: string): Promise<CryptoKey> {
     'raw',
     enc.encode(secret),
     { hash: 'SHA-256', name: 'HMAC' },
-    false, // not extractable
-    ['sign', 'verify'] // key usages
+    false, /** Non-extractable for security */
+    ['sign', 'verify'] /** Required operations for HMAC */
   );
 }
 
@@ -67,7 +100,7 @@ async function importKey(secret: string): Promise<CryptoKey> {
 async function signData(key: CryptoKey, data: string): Promise<string> {
   const enc = new TextEncoder();
   const signatureBuffer = await crypto.subtle.sign('HMAC', key, enc.encode(data));
-  // Convert ArrayBuffer to hex string
+  /** Convert ArrayBuffer to hex string for cookie storage */
   return Array.from(new Uint8Array(signatureBuffer))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
@@ -87,14 +120,13 @@ async function verifySignature(
 ): Promise<boolean> {
   const enc = new TextEncoder();
   try {
-    // Convert hex signature back to ArrayBuffer
+    /** Convert hex signature back to ArrayBuffer for verification */
     const signatureBytes = new Uint8Array(
       signatureHex.match(/.{1,2}/g)!.map(byte => Number.parseInt(byte, 16))
     );
     return await crypto.subtle.verify('HMAC', key, signatureBytes.buffer, enc.encode(data));
   } catch (e) {
-    // Handle errors during hex parsing or verification
-    console.error('Error verifying signature:', e);
+    /** Invalid signature format or verification failure */
     return false;
   }
 }
@@ -120,40 +152,39 @@ async function getApprovedClientsFromCookie(
   const parts = cookieValue.split('.');
 
   if (parts.length !== 2) {
-    console.warn('Invalid cookie format received.');
-    return null; // Invalid format
+    /** Invalid cookie format - expected signature.payload */
+    return null;
   }
 
   const [signatureHex, base64Payload] = parts;
-  const payload = atob(base64Payload); // Assuming payload is base64 encoded JSON string
+  const payload = atob(base64Payload); /** Decode base64 payload to JSON string */
 
   const key = await importKey(secret);
   const isValid = await verifySignature(key, signatureHex, payload);
 
   if (!isValid) {
-    console.warn('Cookie signature verification failed.');
-    return null; // Signature invalid
+    /** Cookie signature verification failed - possible tampering */
+    return null;
   }
 
   try {
     const approvedClients = JSON.parse(payload);
     if (!Array.isArray(approvedClients)) {
-      console.warn('Cookie payload is not an array.');
-      return null; // Payload isn't an array
+      /** Invalid payload structure - expected array of client IDs */
+      return null;
     }
-    // Ensure all elements are strings
+    /** Validate all elements are strings (client IDs) */
     if (!approvedClients.every(item => typeof item === 'string')) {
-      console.warn('Cookie payload contains non-string elements.');
       return null;
     }
     return approvedClients as string[];
   } catch (e) {
-    console.error('Error parsing cookie payload:', e);
-    return null; // JSON parsing failed
+    /** JSON parsing failed - corrupted cookie data */
+    return null;
   }
 }
 
-// --- Exported Functions ---
+/** Exported OAuth utility functions */
 
 /**
  * Checks if a given client ID has already been approved by the user,
@@ -604,8 +635,7 @@ export async function parseRedirectApproval(
       throw new Error('Could not extract clientId from state object.');
     }
   } catch (e) {
-    console.error('Error processing form submission:', e);
-    // Rethrow or handle as appropriate, maybe return a specific error response
+    /** Form processing error - invalid or missing state data */
     throw new Error(`Failed to parse approval form: ${e instanceof Error ? e.message : String(e)}`);
   }
 
