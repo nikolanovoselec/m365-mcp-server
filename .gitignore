@@ -61,13 +61,3 @@ yarn.lock
 # Keep npm for consistency
 !package-lock.json
 
-# Sensitive files per GROUNDRULES.md (for public repositories)
-../GROUNDRULES.md
-../SECRETS.md
-../MEMORY.md
-../.dev.vars
-../wrangler.toml
-# Exclude all parent directories except m365-mcp-server
-../*/
-!../m365-mcp-server/
-
