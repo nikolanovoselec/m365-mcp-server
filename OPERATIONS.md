@@ -1820,9 +1820,11 @@ Configure alerts for critical conditions:
 | Average response time        | >1s     | >3s      | Optimize slow endpoints        |
 | Error rate                   | >1%     | >5%      | Check logs for root cause      |
 
-### Real-time Monitoring Setup
+### Real-time Monitoring Setup (Recommended - Not Implemented)
 
-Real-time monitoring provides immediate visibility into system behavior and performance. Cloudflare Analytics Engine enables custom metrics collection and analysis for deep insights into application-specific patterns.
+**Current Status**: No custom monitoring is currently implemented. The project relies on Cloudflare's built-in analytics and standard console logging.
+
+**Production Recommendation**: Real-time monitoring can provide immediate visibility into system behavior and performance. Cloudflare Analytics Engine could enable custom metrics collection and analysis for deep insights into application-specific patterns.
 
 ```bash
 # Set up Cloudflare Analytics Engine
@@ -1845,11 +1847,13 @@ EOF
 wrangler analytics push analytics-config.json
 ```
 
-### Dashboard Configuration
+### Dashboard Configuration (Recommended - Not Implemented)
 
-Visualization dashboards consolidate metrics into actionable insights. These configurations provide at-a-glance system health monitoring and enable quick identification of trends or anomalies requiring attention.
+**Current Status**: No monitoring dashboards are currently configured. System monitoring relies on Cloudflare Workers built-in dashboards and logs.
 
-Create monitoring dashboard using Grafana or Datadog:
+**Production Recommendation**: Visualization dashboards can consolidate metrics into actionable insights. These configurations would provide at-a-glance system health monitoring and enable quick identification of trends or anomalies requiring attention.
+
+**Example dashboard configuration using Grafana or Datadog:**
 
 ```yaml
 # grafana-dashboard.yml
@@ -1867,11 +1871,13 @@ panels:
     query: "sum by(error_type) (rate(errors_total[5m]))"
 ```
 
-### Health Checks
+### Health Checks (Recommended - Not Implemented)
 
-Automated health checks verify system availability and functionality at regular intervals. These checks detect issues before users report them and can trigger alerts for immediate intervention when problems occur.
+**Current Status**: No automated health checks are currently implemented. System health relies on Cloudflare Workers platform monitoring and manual testing.
 
-Implement automated health checks:
+**Production Recommendation**: Automated health checks can verify system availability and functionality at regular intervals. These checks would detect issues before users report them and could trigger alerts for immediate intervention when problems occur.
+
+**Example health check implementation:**
 
 ```javascript
 // health-check.js
@@ -1897,11 +1903,13 @@ addEventListener("scheduled", (event) => {
 });
 ```
 
-### Log Aggregation
+### Log Aggregation (Recommended - Not Implemented)
 
-Centralized logging consolidates logs from distributed Workers into a single searchable repository. This enables correlation of events across multiple requests and provides historical data for debugging and compliance requirements.
+**Current Status**: Logging uses standard console.log() statements viewable via `wrangler tail`. No centralized log aggregation is currently configured.
 
-Set up centralized logging:
+**Production Recommendation**: Centralized logging can consolidate logs from distributed Workers into a single searchable repository. This would enable correlation of events across multiple requests and provide historical data for debugging and compliance requirements.
+
+**Example centralized logging setup:**
 
 ```bash
 # Export logs to external service
@@ -1920,11 +1928,13 @@ logpush_retention = 30  # days
 EOF
 ```
 
-### Performance Profiling
+### Performance Profiling (Recommended - Not Implemented)
 
-Performance profiling identifies slow operations and resource-intensive code paths. Using browser-standard Performance API markers, you can measure specific operations and optimize based on real production data.
+**Current Status**: No performance profiling is currently implemented. Performance monitoring relies on Cloudflare Workers built-in metrics and manual observation.
 
-Monitor performance bottlenecks:
+**Production Recommendation**: Performance profiling can identify slow operations and resource-intensive code paths. Using browser-standard Performance API markers, specific operations could be measured and optimized based on real production data.
+
+**Example performance profiling implementation:**
 
 ```javascript
 // Add performance markers
@@ -1940,11 +1950,13 @@ console.log(`Graph API call took ${measure.duration}ms`);
 
 ### Scaling & Performance
 
-#### Load Testing
+#### Load Testing (Recommended - Not Implemented)
 
-Performance testing using Artillery to simulate production traffic patterns and identify bottlenecks. The load test gradually ramps up from 10 to 50 concurrent users over several minutes, measuring response times and error rates under stress.
+**Current Status**: No load testing infrastructure is currently configured. Performance testing relies on manual testing and Cloudflare Workers platform capabilities.
 
-Using Artillery for load testing:
+**Production Recommendation**: Performance testing using Artillery or similar tools can simulate production traffic patterns and identify bottlenecks. Load tests can gradually ramp up concurrent users to measure response times and error rates under stress.
+
+**Example load testing setup using Artillery:**
 
 ```bash
 # Install artillery
