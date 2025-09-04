@@ -176,7 +176,7 @@ The simplest way to connect your AI assistant to Microsoft 365. Just add the MCP
 3. Authenticate when prompted (will open Microsoft login in your browser)
 4. And voilà! Now you can ask your AI to email your mom those meeting notes you keep promising to send, schedule that dentist appointment you've been avoiding, or find that one email from 2023 with the important attachment you swear you didn't delete.
 
-**Compatibility:** Works with any AI assistant that supports the MCP protocol standard. Tested with various MCP-compatible desktop and web clients.
+**Compatibility:** Compatible with any AI assistant that implements the Model Context Protocol specification. Built using @modelcontextprotocol/sdk v1.17.4 for full MCP compliance and tested with Claude.
 
 ### Option 2: mcp-remote Integration
 
