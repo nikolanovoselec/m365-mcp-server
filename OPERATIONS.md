@@ -9,7 +9,7 @@ Complete operational documentation for development, deployment, and maintenance 
 - [Development Setup](#development-setup)
 - [Project Structure](#project-structure)
 - [Development Workflow](#development-workflow)
-- [Testing Procedures](#testing-procedures)
+- [Testing](#testing)
 - [Adding New Features](#adding-new-features)
 - [Code Standards](#code-standards)
 - [Debugging Guide](#debugging-guide)
@@ -27,7 +27,10 @@ Complete operational documentation for development, deployment, and maintenance 
 
 ### Part III: Advanced Operations
 
+- [Current CI/CD Setup](#current-cicd-setup)
+- [Maintenance Procedures](#maintenance-procedures-1)
 - [Production Monitoring](#production-monitoring)
+- [Scaling & Performance](#scaling--performance)
 
 ---
 
@@ -78,7 +81,7 @@ wrangler auth login
 cp .dev.vars.example .dev.vars
 cp wrangler.example.toml wrangler.toml
 
-# Configure with your Microsoft 365 and Cloudflare credentials
+# Configure with Microsoft 365 and Cloudflare credentials
 ```
 
 ### Environment Configuration
@@ -142,7 +145,7 @@ id = "your-cache-kv-namespace-id"
 
 ## Project Structure
 
-The codebase follows a modular architecture with clear separation between protocol handling, OAuth flows, and Microsoft Graph integration. Each component has a specific responsibility in the MCP server implementation, enabling maintainable and testable code.
+The codebase follows a modular architecture with clear separation between protocol handling, OAuth flows, and Microsoft Graph integration. Each component has a specific responsibility in the MCP server implementation.
 
 ```
 src/
@@ -153,17 +156,18 @@ src/
 ├── workers-oauth-utils.ts   # OAuth utility functions
 └── utils.ts                 # General utility functions
 
-tests/
-├── unit/                    # Unit tests for individual components
-├── integration/             # Integration tests with external APIs
-└── fixtures/                # Test data and mock responses
+.github/
+└── workflows/
+    └── ci.yml              # Basic CI workflow
 
-docs/
-├── README.md               # Project overview and quick start
-├── ARCHITECTURE.md         # Technical architecture documentation
-├── API_REFERENCE.md        # Complete API documentation
-├── DEPLOYMENT.md           # Production deployment guide
-└── DEVELOPMENT.md          # This development guide
+Configuration files:
+├── package.json            # Dependencies and scripts
+├── tsconfig.json           # TypeScript configuration
+├── .eslintrc.js           # ESLint configuration
+├── wrangler.toml          # Cloudflare Workers deployment config
+├── wrangler.example.toml  # Template configuration
+├── .dev.vars              # Local development environment
+└── .dev.vars.example      # Template environment variables
 ```
 
 ### Key Components
@@ -267,21 +271,14 @@ ls .wrangler/state/v3/kv/
 rm -rf .wrangler/state/
 ```
 
-### 4. Code Quality Workflow (NEW - Improved)
+### 4. Code Quality Workflow
 
-This project now includes automated code quality checks to prevent issues:
+The project includes basic code quality checks:
 
-**Setup Pre-commit Hooks (One-time):**
-
-```bash
-# Install git hooks that run validation before each commit
-npm run setup-hooks
-```
-
-**Development Commands:**
+**Available Commands:**
 
 ```bash
-# Full validation (runs automatically before build/deploy)
+# Full validation (runs before build/deploy)
 npm run validate
 
 # Individual checks
@@ -299,202 +296,206 @@ npm run build         # Validates, cleans, then builds
 npm run deploy        # Validates, then deploys to Cloudflare
 ```
 
-**Manual Pre-commit Check:**
+**Note:** Pre-commit hooks are referenced in package.json but not currently implemented. The `precommit` and `setup-hooks` scripts would need the missing `scripts/` directory to be created.
+
+## Testing
+
+The testing infrastructure is currently in its foundational stage. While the project includes Vitest as a dependency and has the necessary TypeScript configuration for comprehensive testing, no test implementations exist yet.
+
+### Current Testing Capabilities
+
+The project provides essential quality assurance tools for development:
 
 ```bash
-# Run the same checks as the git hook
-npm run precommit
+# TypeScript type checking - validates all type definitions
+npm run type-check
+
+# ESLint code analysis - enforces code quality standards
+npm run lint
+
+# Prettier formatting verification
+npm run format:check
+
+# Build validation - ensures production readiness
+npm run build
 ```
 
-**Code Quality Benefits:**
+### Testing Architecture Recommendations
 
-- Prevents backup files from being committed
-- Ensures TypeScript compilation passes
-- Enforces consistent code style
-- Catches unused variables and imports
-- Validates build before deployment
-- Automatic cleanup of temporary files
+When implementing a comprehensive test suite, the architecture should follow these patterns:
 
-## Testing Procedures
+#### Unit Testing Strategy
 
-### Unit Tests
-
-Unit tests validate individual components in isolation using mocked dependencies. They ensure that each function, class, and module behaves correctly under various input conditions without requiring external services or network calls.
-
-```bash
-# Run all unit tests
-npm test
-
-# Run specific test file
-npm test -- tests/unit/microsoft-graph.test.ts
-
-# Run tests in watch mode
-npm test -- --watch
-```
-
-**Test Structure Example:**
-
-This example demonstrates the recommended testing pattern using Vitest framework with proper mocking and assertion strategies. Tests are organized by component, with clear setup, execution, and verification phases for maintainability.
-
+**Microsoft Graph Client Testing** (`src/microsoft-graph.ts:607 lines`)
 ```typescript
-// tests/unit/microsoft-graph.test.ts
-import { describe, it, expect, beforeEach } from "vitest";
-import { MicrosoftGraphClient } from "../../src/microsoft-graph";
-
-describe("MicrosoftGraphClient", () => {
-  let client: MicrosoftGraphClient;
-  let mockEnv: Env;
-
-  beforeEach(() => {
-    mockEnv = {
-      GRAPH_API_VERSION: "v1.0",
-      MICROSOFT_CLIENT_ID: "test-id",
-      // ... other env vars
-    };
-    client = new MicrosoftGraphClient(mockEnv);
-  });
-
-  it("should send email successfully", async () => {
-    const mockResponse = { status: 204, json: () => Promise.resolve({}) };
-    global.fetch = vi.fn().mockResolvedValue(mockResponse);
-
-    const result = await client.sendEmail("fake-token", {
-      to: "test@example.com",
-      subject: "Test",
-      body: "Hello",
+// Example test structure for Graph API client
+describe('MicrosoftGraphClient', () => {
+  test('sendEmail should construct proper Graph API request', async () => {
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: new Headers({ 'content-type': 'application/json' })
     });
-
-    expect(fetch).toHaveBeenCalledWith(
-      "https://graph.microsoft.com/v1.0/me/sendMail",
+    
+    const client = new MicrosoftGraphClient(mockEnv);
+    await client.sendEmail('mock-token', {
+      to: 'test@example.com',
+      subject: 'Test Email',
+      body: 'Test content'
+    });
+    
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://graph.microsoft.com/v1.0/me/sendMail',
       expect.objectContaining({
-        method: "POST",
+        method: 'POST',
         headers: expect.objectContaining({
-          Authorization: "Bearer fake-token",
-        }),
-      }),
+          'Authorization': 'Bearer mock-token',
+          'Content-Type': 'application/json'
+        })
+      })
     );
   });
-
-  it("should handle Microsoft Graph errors", async () => {
-    const mockError = {
-      status: 400,
-      json: () =>
-        Promise.resolve({
-          error: { message: "Invalid recipient" },
-        }),
-    };
-    global.fetch = vi.fn().mockResolvedValue(mockError);
-
-    await expect(
-      client.sendEmail("fake-token", {
-        to: "invalid-email",
-        subject: "Test",
-        body: "Hello",
-      }),
-    ).rejects.toThrow("Microsoft Graph API error: 400 - Invalid recipient");
-  });
 });
 ```
 
-### Integration Tests
+#### Integration Testing Strategy
 
-Integration tests verify that components work correctly together with real or simulated external services. These tests validate OAuth flows, Microsoft Graph API interactions, and end-to-end scenarios to ensure the system functions properly in production-like conditions.
+**OAuth Flow Testing**
+- Mock Microsoft Identity Platform endpoints
+- Validate token exchange callback functionality
+- Test authorization code to access token conversion
+- Verify refresh token handling
 
-```bash
-# Run integration tests (requires valid credentials)
-npm run test:integration
-
-# Run against local development server
-npm run test:integration:local
-```
-
-**Integration Test Example:**
-
-This integration test validates the complete OAuth authorization flow from client registration through token exchange. It simulates real client behavior and verifies that all components interact correctly to provide authenticated access.
-
+**Durable Object Testing**
 ```typescript
-// tests/integration/oauth-flow.test.ts
-import { describe, it, expect } from "vitest";
-
-describe("OAuth Integration", () => {
-  const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:8787";
-
-  it("should complete full OAuth flow", async () => {
-    // 1. Register client
-    const registerResponse = await fetch(`${BASE_URL}/register`, {
-      method: "POST",
-      body: JSON.stringify({
-        client_name: "Integration Test Client",
-        redirect_uris: ["http://localhost:3000/callback"],
-      }),
+// Example Durable Object test with Miniflare
+describe('MicrosoftMCPAgent', () => {
+  test('should handle MCP tool/list requests', async () => {
+    const mf = new Miniflare({
+      modules: true,
+      script: workerScript,
+      durableObjects: {
+        MCP_OBJECT: 'MicrosoftMCPAgent'
+      }
     });
-
-    const client = await registerResponse.json();
-    expect(client.client_id).toBeDefined();
-
-    // 2. Start authorization
-    const authUrl = `${BASE_URL}/authorize?client_id=${client.client_id}&response_type=code&redirect_uri=http://localhost:3000/callback`;
-    const authResponse = await fetch(authUrl);
-    expect(authResponse.status).toBe(302);
-
-    // 3. Complete with Microsoft (mock)
-    // ... additional OAuth flow testing
+    
+    const response = await mf.dispatchFetch('http://localhost/sse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/list',
+        params: {}
+      })
+    });
+    
+    const result = await response.json();
+    expect(result.result.tools).toHaveLength(8);
   });
 });
 ```
 
-### Load Testing
+### Manual Testing Procedures
 
-Load testing simulates production traffic patterns to identify performance bottlenecks and capacity limits. Using k6 or Artillery, these tests gradually increase concurrent users to measure response times, error rates, and resource utilization under stress.
+#### Development Environment Validation
 
+**Basic Connectivity Test**
 ```bash
-# Install k6 for load testing
-npm install -g k6
-
-# Run load tests
-k6 run tests/load/basic-load.js
+# Test discovery endpoint (no auth required)
+curl -X POST http://localhost:8787/sse \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  | jq '.result.tools | length'
 ```
 
-**Load Test Example:**
+**OAuth Flow Manual Test**
+```bash
+# 1. Start local development server
+npm run dev
 
-This k6 script simulates realistic user behavior with gradual traffic ramp-up and sustained load periods. It measures key performance indicators like response time and success rate to ensure the system meets performance requirements.
+# 2. Open OAuth authorization URL in browser
+open "http://localhost:8787/authorize?client_id=test&response_type=code&redirect_uri=http://localhost:8787/callback"
 
-```javascript
-// tests/load/basic-load.js
-import http from "k6/http";
-import { check, sleep } from "k6";
+# 3. Complete Microsoft authentication flow
+# 4. Verify successful token exchange and session creation
+```
 
-export let options = {
-  stages: [
-    { duration: "2m", target: 10 }, // Ramp up
-    { duration: "5m", target: 50 }, // Stay at 50 users
-    { duration: "2m", target: 0 }, // Ramp down
-  ],
+#### Production Environment Validation
+
+**Health Check Sequence**
+```bash
+# 1. Verify worker deployment
+curl -I https://your-worker.workers.dev/
+
+# 2. Test OAuth provider endpoints
+curl https://your-worker.workers.dev/.well-known/openid-configuration | jq .
+
+# 3. Validate Durable Objects binding
+wrangler tail --format json | grep -i "durable"
+
+# 4. Test discovery phase
+curl -X POST https://your-worker.workers.dev/sse \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{}}}' \
+  | jq .
+```
+
+### Testing Environment Setup
+
+#### Mock Services Configuration
+
+**Microsoft Graph API Mocking**
+```typescript
+// Setup MSW (Mock Service Worker) for Graph API responses
+const graphHandlers = [
+  rest.post('https://graph.microsoft.com/v1.0/me/sendMail', (req, res, ctx) => {
+    return res(ctx.status(204));
+  }),
+  
+  rest.get('https://graph.microsoft.com/v1.0/me/messages', (req, res, ctx) => {
+    return res(ctx.json({
+      value: [
+        {
+          id: 'mock-email-1',
+          subject: 'Test Email',
+          from: { emailAddress: { address: 'test@example.com' } }
+        }
+      ]
+    }));
+  })
+];
+```
+
+#### Test Data Management
+
+**OAuth Token Fixtures**
+```typescript
+// Mock OAuth tokens for testing
+const mockOAuthTokens = {
+  accessToken: 'mock.access.token',
+  refreshToken: 'mock.refresh.token',
+  expiresIn: 3600,
+  tokenType: 'Bearer'
 };
-
-export default function () {
-  // Test tool discovery
-  let response = http.post(
-    `${__ENV.BASE_URL}/sse`,
-    JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/list",
-      params: {},
-    }),
-    {
-      headers: { "Content-Type": "application/json" },
-    },
-  );
-
-  check(response, {
-    "tool discovery succeeds": (r) => r.status === 200,
-    "response time < 500ms": (r) => r.timings.duration < 500,
-  });
-
-  sleep(1);
-}
 ```
+
+### Testing Gaps and Priorities
+
+**High Priority**
+1. Unit tests for all Microsoft Graph client methods
+2. OAuth flow integration tests
+3. Durable Object state management tests
+
+**Medium Priority**
+1. End-to-end MCP protocol compliance tests
+2. Error handling validation tests
+3. Rate limiting behavior tests
+
+**Low Priority**
+1. Performance benchmarking tests
+2. Multi-user concurrent access tests
+3. Token refresh edge case tests
 
 ## Adding New Features
 
@@ -1056,7 +1057,7 @@ git checkout -b feature/your-feature-name
 **3. Development Process**
 
 ```bash
-# Make your changes
+# Make changes
 # Add tests for new functionality
 npm test
 
@@ -1209,7 +1210,7 @@ wrangler auth login
 
 # Verify authentication
 wrangler whoami
-# Should show your account details
+# Shows account details
 ```
 
 **Create KV Namespaces:**
@@ -1240,7 +1241,7 @@ npm install
 cp .dev.vars.example .dev.vars
 cp wrangler.example.toml wrangler.toml
 
-# Configure with your production values
+# Configure with production values
 ```
 
 ### Step 3: Microsoft Entra ID Configuration
@@ -1255,7 +1256,7 @@ cp wrangler.example.toml wrangler.toml
    - **Redirect URI**: `https://your-worker-domain.com/callback`
 
 **Configure Redirect URIs:**
-Add these redirect URIs to your app registration:
+Add these redirect URIs to the app registration:
 
 ```
 https://your-worker-domain.workers.dev/callback
@@ -1299,7 +1300,7 @@ wrangler secret put COOKIE_SECRET
 
 ### Step 5: Configure wrangler.toml
 
-Update your `wrangler.toml` with production values:
+Update `wrangler.toml` with production values:
 
 ```toml
 name = "m365-mcp-server-prod"
@@ -1307,7 +1308,7 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Your Cloudflare account ID
+# Cloudflare account ID
 account_id = "your-account-id-here"
 
 [vars]
@@ -1363,7 +1364,7 @@ Production configuration separates public variables from secrets for security. P
 GRAPH_API_VERSION = "v1.0"                    # Microsoft Graph API version
 MICROSOFT_CLIENT_ID = "your-client-id"        # Microsoft app client ID
 MICROSOFT_TENANT_ID = "your-tenant-id"        # Microsoft tenant ID
-WORKER_DOMAIN = "your-domain.workers.dev"     # Your worker domain
+WORKER_DOMAIN = "your-domain.workers.dev"     # Worker domain
 PROTOCOL = "https"                             # Protocol for callbacks
 ```
 
@@ -1380,7 +1381,7 @@ COOKIE_SECRET           # Secret for HMAC cookie signing
 
 ### Custom Domain Setup (Optional)
 
-Custom domains provide professional branding and simplified URLs for production deployments. This configuration maps your domain to the Cloudflare Worker and updates all OAuth callbacks to use the custom domain instead of the workers.dev subdomain.
+Custom domains provide professional branding and simplified URLs for production deployments. This configuration maps the domain to the Cloudflare Worker and updates all OAuth callbacks to use the custom domain instead of the workers.dev subdomain.
 
 **Configure Custom Domain:**
 
@@ -1803,93 +1804,57 @@ _This deployment guide provides complete operational procedures for running the 
 
 ## Part III: Advanced Operations
 
-### CI/CD Pipeline
+### Current CI/CD Setup
 
 #### GitHub Actions Workflow
 
-Automates testing and deployment to Cloudflare Workers using GitHub Actions CI/CD pipeline. The workflow runs tests on pull requests, validates code quality, and deploys to production when changes are merged to the main branch.
+The project includes a basic CI workflow in `.github/workflows/ci.yml` that:
 
-Create `.github/workflows/deploy.yml`:
+- Runs on push to main/develop branches and pull requests
+- Tests against Node.js 18.x and 20.x
+- Performs type checking, building, linting, and format checking
+- Does NOT include automated deployment or test coverage
 
 ```yaml
-name: Deploy to Cloudflare Workers
+name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: "18"
-          cache: "npm"
-      - run: npm ci
-      - run: npm run type-check
-      - run: npm run lint
-      - run: npm test -- --coverage
-      - uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  deploy:
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: "18"
-      - run: npm ci
-      - uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: deploy
-          secrets: |
-            MICROSOFT_CLIENT_SECRET
-            ENCRYPTION_KEY
-            COOKIE_SECRET
-        env:
-          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
-          COOKIE_SECRET: ${{ secrets.COOKIE_SECRET }}
-```
-
-#### Automated Testing Pipeline
-
-Comprehensive test suite that validates code across multiple Node.js versions and generates coverage reports. This pipeline ensures code quality and compatibility before deployment, running all validation checks in parallel for efficiency.
-
-```yaml
-name: Test Suite
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: [18, 20]
+        node-version: [18.x, 20.x]
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
-      - run: npm ci
-      - run: npm run validate
-      - run: npm test -- --coverage
-      - name: Upload coverage
-        uses: actions/upload-artifact@v3
-        with:
-          name: coverage-${{ matrix.node }}
-          path: coverage/
+          node-version: ${{ matrix.node-version }}
+      - name: Install dependencies
+        run: npm install
+      - name: Run type checking
+        run: npm run type-check
+      - name: Run build
+        run: npm run build:ci
+      - name: Run linting
+        run: npm run lint
+      - name: Run formatting check
+        run: npm run format:check
+```
+
+#### Manual Deployment
+
+Deployment is currently manual using:
+
+```bash
+npm run deploy  # Validates then deploys via wrangler
 ```
 
 ### Maintenance Procedures
@@ -2017,7 +1982,7 @@ wrangler tail --format json | jq '. | select(.logs[] | contains("Graph API error
 
 ### Alerting Thresholds
 
-Proactive alerting ensures rapid response to issues before they escalate. These thresholds are based on operational experience and should be adjusted based on your specific usage patterns and SLA requirements.
+Proactive alerting ensures rapid response to issues before they escalate. These thresholds are based on operational experience and should be adjusted based on specific usage patterns and SLA requirements.
 
 Configure alerts for critical conditions:
 

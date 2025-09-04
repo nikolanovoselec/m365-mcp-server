@@ -469,7 +469,7 @@ A: The server code is open source. You'll need your own Microsoft 365 subscripti
 ### Security Questions
 
 **Q: How are my Microsoft credentials stored?**
-A: Credentials are never stored. OAuth tokens are encrypted with AES-256-GCM and stored in Cloudflare KV with automatic expiration.
+A: Credentials are never stored. OAuth tokens are securely managed by the Cloudflare Workers OAuth Provider with automatic expiration.
 
 **Q: Can others access my emails through this server?**
 A: No. Each user authenticates separately and can only access their own Microsoft 365 data.
@@ -528,17 +528,17 @@ cp wrangler.example.toml wrangler.toml
 npm run dev
 ```
 
-### Testing
+### Development Commands
 
 ```bash
-# Run all tests
-npm test
-
 # Type checking
 npm run type-check
 
 # Linting
 npm run lint
+
+# Build for deployment
+npm run build
 ```
 
 See [OPERATIONS.md](OPERATIONS.md) for complete development workflow.
@@ -568,10 +568,10 @@ See [OPERATIONS.md](OPERATIONS.md) for complete deployment guide.
 ## Security
 
 - **OAuth 2.1 + PKCE** compliance with S256 challenge method
-- **End-to-end encryption** for all tokens and sensitive data
+- **Secure token management** via Cloudflare Workers OAuth Provider
 - **Zero client secrets** for public clients (mcp-remote compatibility)
-- **HMAC-signed approval cookies** for session management
-- **Input sanitization** and XSS protection
+- **Session isolation** via Durable Objects architecture
+- **Built-in protection** against common web vulnerabilities
 - **Rate limiting** and abuse prevention
 
 ## License
@@ -580,10 +580,10 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-We welcome contributions! Please read [OPERATIONS.md](OPERATIONS.md) for:
+We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 - Development setup and workflow
-- Code standards and testing procedures
+- Code standards and quality guidelines
 - Pull request requirements
 - Issue reporting guidelines
 

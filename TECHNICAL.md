@@ -23,8 +23,8 @@ Complete technical documentation merging architecture, API reference, and implem
 17. [Tool Reference](#tool-reference)
 18. [Resource Reference](#resource-reference)
 19. [Error Handling](#error-handling)
-20. [Testing Guide](#testing-guide)
-21. [Protocol Examples](#protocol-examples)
+20. [Development Guide](#development-guide)
+21. [Production Deployment Recommendations](#production-deployment-recommendations)
 
 ## System Overview
 
@@ -117,25 +117,9 @@ if (isWebSocketRequest) {
 }
 ```
 
-### WebSocket Accept Key Generation (RFC 6455)
+### WebSocket Protocol Support
 
-Implements the RFC 6455 WebSocket handshake protocol by generating the required Sec-WebSocket-Accept header. This cryptographic handshake ensures the server understands WebSocket protocol and prevents cross-protocol attacks by combining the client's key with a magic string and returning a SHA-1 hash.
-
-```typescript
-private async generateWebSocketAccept(webSocketKey: string): Promise<string> {
-  const webSocketMagicString = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
-  const concatenated = webSocketKey + webSocketMagicString;
-
-  const hashBuffer = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(concatenated));
-  const hashArray = new Uint8Array(hashBuffer);
-
-  let binary = '';
-  for (let i = 0; i < hashArray.length; i++) {
-    binary += String.fromCharCode(hashArray[i]);
-  }
-  return btoa(binary);
-}
-```
+WebSocket support is provided by the MCP SDK's built-in WebSocket handling capabilities. The server delegates WebSocket upgrade requests directly to the Durable Object, which manages the WebSocket handshake and protocol negotiation according to RFC 6455 specifications.
 
 ## OAuth 2.1 + PKCE Implementation
 
@@ -668,7 +652,7 @@ Cloudflare Workers serves all content over HTTP/2 by default for performance rea
 - Forces fallback to less efficient SSE (Server-Sent Events) transport
 
 **Current Workaround**:
-We implemented multi-signal detection that looks for WebSocket indicators beyond just the Upgrade header:
+The system implements multi-signal detection that looks for WebSocket indicators beyond just the Upgrade header:
 
 ```typescript
 // Multiple detection signals for WebSocket requests
@@ -693,7 +677,7 @@ const isWebSocketRequest =
 ### 2. OAuth Provider Token Mismatch
 
 **Problem Description**:
-The `@cloudflare/workers-oauth-provider` library manages its own token lifecycle and format, creating JWTs with Cloudflare-specific claims. However, our MCP server needs actual Microsoft Graph API access tokens to make Office 365 API calls. The OAuth provider's token format is incompatible with Microsoft's bearer token requirements, and there's no built-in mechanism to store or pass external provider tokens through the OAuth flow.
+The `@cloudflare/workers-oauth-provider` library manages its own token lifecycle and format, creating JWTs with Cloudflare-specific claims. However, the MCP server needs actual Microsoft Graph API access tokens to make Office 365 API calls. The OAuth provider's token format is incompatible with Microsoft's bearer token requirements, and there's no built-in mechanism to store or pass external provider tokens through the OAuth flow.
 
 **Technical Impact**:
 
@@ -703,7 +687,7 @@ The `@cloudflare/workers-oauth-provider` library manages its own token lifecycle
 - Increased complexity in token storage and retrieval
 
 **Current Workaround**:
-We implemented a token exchange callback that intercepts the OAuth flow and stores Microsoft tokens alongside Cloudflare's:
+The system implements a token exchange callback that intercepts the OAuth flow and stores Microsoft tokens alongside Cloudflare's:
 
 ```typescript
 tokenExchangeCallback: async (options: any) => {
@@ -750,7 +734,7 @@ Cloudflare's ExecutionContext is designed for lifecycle management (waitUntil, p
 - Props can be accidentally dropped or overwritten
 
 **Current Workaround**:
-We manually inject props at the routing layer before Durable Object invocation:
+The system manually injects props at the routing layer before Durable Object invocation:
 
 ```typescript
 // Manual props injection for SSE endpoint
@@ -792,7 +776,7 @@ The MCP (Model Context Protocol) specification requires that certain discovery m
 - Forces complex authentication bypass logic in application code
 
 **Current Workaround**:
-We temporarily nullify props during discovery method detection:
+The system temporarily nullifies props during discovery method detection:
 
 ```typescript
 const discoveryMethods = [
@@ -828,7 +812,7 @@ if (isDiscoveryMethod) {
 ### 5. Durable Object WebSocket Delegation Timing
 
 **Problem Description**:
-When using the OAuth provider wrapper pattern, WebSocket upgrade requests must be delegated to the Durable Object before any OAuth processing occurs. The OAuth provider's middleware intercepts all requests and attempts to parse them as HTTP, which corrupts the WebSocket upgrade handshake. By the time the request reaches our handler, the WebSocket upgrade is already broken. This timing issue forces us to detect and delegate WebSocket requests at the earliest possible point in the request pipeline.
+When using the OAuth provider wrapper pattern, WebSocket upgrade requests must be delegated to the Durable Object before any OAuth processing occurs. The OAuth provider's middleware intercepts all requests and attempts to parse them as HTTP, which corrupts the WebSocket upgrade handshake. By the time the request reaches the handler, the WebSocket upgrade is already broken. This timing issue requires detecting and delegating WebSocket requests at the earliest possible point in the request pipeline.
 
 **Technical Impact**:
 
@@ -838,7 +822,7 @@ When using the OAuth provider wrapper pattern, WebSocket upgrade requests must b
 - Cannot apply authentication to WebSocket endpoints
 
 **Current Workaround**:
-We implemented early detection and delegation before OAuth processing:
+The system implements early detection and delegation before OAuth processing:
 
 ```typescript
 async fetch(request: Request): Promise<Response> {
@@ -872,7 +856,7 @@ The MCP remote client (`mcp-remote`) expects to use a static, pre-configured cli
 - Client ID mapping logic adds complexity and potential race conditions
 
 **Current Workaround**:
-We maintain a KV-based mapping between static and dynamic client IDs:
+The system maintains a KV-based mapping between static and dynamic client IDs:
 
 ```typescript
 const MCP_CLIENT_ID = "rWJu8WV42zC5pfGT"; // Static ID for mcp-remote
@@ -908,7 +892,7 @@ async function handleAuthorizeWithClientMapping(request) {
 ### 7. Empty Props State Ambiguity
 
 **Problem Description**:
-In our implementation, an empty or null `props` object can occur in multiple scenarios: during the discovery phase (legitimate), after authentication failure (error state), or when props are lost during context passing (bug). This ambiguity makes it difficult to distinguish between intentional unauthenticated access and actual errors. The lack of explicit state indicators forces us to infer the context from other signals, leading to fragile code that can fail in unexpected ways.
+In the implementation, an empty or null `props` object can occur in multiple scenarios: during the discovery phase (legitimate), after authentication failure (error state), or when props are lost during context passing (bug). This ambiguity makes it difficult to distinguish between intentional unauthenticated access and actual errors. The lack of explicit state indicators requires inferring the context from other signals, leading to fragile code that can fail in unexpected ways.
 
 **Technical Impact**:
 
@@ -918,7 +902,7 @@ In our implementation, an empty or null `props` object can occur in multiple sce
 - State management code becomes convoluted with multiple checks
 
 **Current Workaround**:
-We track discovery context explicitly to disambiguate empty props:
+The system tracks discovery context explicitly to disambiguate empty props:
 
 ```typescript
 // Discovery context tracking
@@ -951,7 +935,7 @@ if (!this.props && !this.discoveryContext.isDiscovery) {
 ### 8. SSE Static Method Requirement for HTTP/2
 
 **Problem Description**:
-Server-Sent Events (SSE) is our fallback transport when WebSocket fails due to HTTP/2. However, the Cloudflare Workers runtime requires SSE handlers to be implemented as static methods on Durable Objects when using the agents library pattern. This creates a challenge because static methods can't access instance properties (like authentication props), forcing us to pass all context through the ExecutionContext in creative ways. The static method requirement seems to be related to how Cloudflare optimizes HTTP/2 connection handling at the edge.
+Server-Sent Events (SSE) is the fallback transport when WebSocket fails due to HTTP/2. However, the Cloudflare Workers runtime requires SSE handlers to be implemented as static methods on Durable Objects when using the agents library pattern. This creates a challenge because static methods can't access instance properties (like authentication props), requiring passing all context through the ExecutionContext. The static method requirement seems to be related to how Cloudflare optimizes HTTP/2 connection handling at the edge.
 
 **Technical Impact**:
 
@@ -961,7 +945,7 @@ Server-Sent Events (SSE) is our fallback transport when WebSocket fails due to H
 - Makes SSE implementation more complex than necessary
 
 **Current Workaround**:
-We implement a static `serveSSE()` method that creates temporary sessions:
+The system implements a static `serveSSE()` method that creates temporary sessions:
 
 ```typescript
 // Static SSE handler required by Cloudflare Workers runtime
@@ -1003,14 +987,14 @@ export class MicrosoftMCPAgent extends McpAgent {
 
 Comprehensive analysis of platform limitations encountered when building protocol-compliant services on Cloudflare Workers, with documented workarounds and recommended platform improvements.
 
-These eight architectural challenges represent significant engineering overhead when building protocol-compliant services on Cloudflare Workers. While we've developed workarounds for each issue, native platform support would greatly simplify implementation and improve reliability. The core themes are:
+These eight architectural challenges represent significant engineering overhead when building protocol-compliant services on Cloudflare Workers. While workarounds exist for each issue, native platform support would greatly simplify implementation and improve reliability. The core themes are:
 
 1. **HTTP/2 limitations** affecting WebSocket and upgrade mechanisms
 2. **OAuth provider inflexibility** in token management and authentication bypass
 3. **Context passing complexity** through Durable Objects boundaries
 4. **Static method requirements** that complicate state management
 
-We believe addressing these issues would make Cloudflare Workers more attractive for complex protocol implementations like MCP, GraphQL subscriptions, and other stateful protocols that require flexible authentication and transport negotiation.
+Addressing these issues would make Cloudflare Workers more attractive for complex protocol implementations like MCP, GraphQL subscriptions, and other stateful protocols that require flexible authentication and transport negotiation.
 
 ## Token Management Details
 
@@ -1150,75 +1134,40 @@ Performance characteristics of Cloudflare KV for token storage, configuration ca
 
 ### Response Time Optimization
 
-Implements a cache-first strategy for Microsoft Graph API responses to minimize latency and reduce API calls. Responses are cached in CACHE_KV with 5-minute TTLs, and requests include timeout controls to prevent hanging connections. This pattern significantly improves response times for frequently accessed data like recent emails or calendar events.
+Response times are optimized through:
 
-```typescript
-// Cache-first strategy for repeated requests
-const cacheKey = `emails-${userId}-${folder}-${timestamp}`;
-let cached = await env.CACHE_KV.get(cacheKey);
+- **Edge Computing**: Cloudflare Workers run at global edge locations
+- **HTTP/2 Multiplexing**: Efficient connection reuse for Microsoft Graph API calls
+- **Built-in Caching**: Cloudflare automatically caches static assets and API responses
 
-if (cached) {
-  return JSON.parse(cached);
-}
+No application-level caching is currently implemented. Response optimization relies on Cloudflare's edge network and Microsoft Graph API's built-in caching mechanisms.
 
-// Fetch fresh data with timeout
-const controller = new AbortController();
-const timeoutId = setTimeout(() => controller.abort(), 5000);
+### Platform Performance Characteristics
 
-try {
-  const response = await fetch(graphEndpoint, {
-    signal: controller.signal,
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+Performance is determined by Cloudflare Workers platform capabilities and Microsoft Graph API response times:
 
-  const data = await response.json();
-
-  // Cache successful responses
-  await env.CACHE_KV.put(cacheKey, JSON.stringify(data), {
-    expirationTtl: 300,
-  });
-
-  return data;
-} finally {
-  clearTimeout(timeoutId);
-}
-```
-
-### Performance Metrics
-
-Measured performance benchmarks from production deployments showing real-world latencies and throughput capabilities.
-
-- **Cold Start**: <50ms on Cloudflare edge
-- **Tool Discovery**: <100ms (cached responses)
-- **Tool Execution**: <500ms (Microsoft Graph API dependent)
-- **WebSocket Connection**: <200ms establishment
-- **OAuth Flow**: <2s end-to-end
+- **Cold Start**: Cloudflare Workers V8 isolate initialization
+- **Tool Discovery**: Limited by MCP protocol message processing
+- **Tool Execution**: Dependent on Microsoft Graph API latency
+- **WebSocket Connection**: Subject to HTTP/2 upgrade limitations
+- **OAuth Flow**: Multi-redirect flow through Microsoft identity platform
 
 ## Session Management
 
-### Unlimited Concurrent Sessions
+### Durable Objects Sessions
 
-The system supports unlimited concurrent sessions through Cloudflare Durable Objects, with each WebSocket connection receiving its own isolated instance. This architecture ensures perfect session isolation without shared state, enabling horizontal scaling limited only by Cloudflare's infrastructure capacity rather than application design.
+Sessions are managed using Cloudflare Durable Objects:
+
+- Each connection gets a unique Durable Object instance
+- Session state persists for the duration of the connection
+- No shared state between sessions
+- Automatic cleanup when connections terminate
 
 ```typescript
-// Each WebSocket gets unique Durable Object instance
-const sessionId = crypto.randomUUID();
-const id = env.MCP_OBJECT.idFromName(`ws-${sessionId}`);
-const stub = env.MCP_OBJECT.get(id);
-
-// Session persists until WebSocket disconnection
-export class MicrosoftMCPAgent extends McpAgent<Env, State, Props> {
-  private sessionState: {
-    userId?: string;
-    connectionTime: number;
-    lastActivity: number;
-    toolCallCount: number;
-  } = {
-    connectionTime: Date.now(),
-    lastActivity: Date.now(),
-    toolCallCount: 0,
-  };
-}
+// Simple session state tracking
+initialState: State = {
+  lastActivity: Date.now(),
+};
 ```
 
 ### Session Persistence
@@ -1377,93 +1326,14 @@ const scopes = scopeConfigurations[scope] || scopeConfigurations.full;
 
 ## Security Implementation
 
-### OAuth 2.1 + PKCE Compliance
+Security is provided by the Cloudflare Workers OAuth Provider which handles:
 
-Full implementation of OAuth 2.1 security requirements including Proof Key for Code Exchange (PKCE) for public clients.
-
-- **PKCE Challenge/Response**: RFC 7636 compliant implementation with S256 method
-- **State Parameter Encryption**: Cryptographically secure state management
+- **OAuth 2.1 + PKCE**: Standards-compliant authorization code flow with PKCE
+- **State Parameter Validation**: Built-in state management for CSRF protection  
 - **Dynamic Client Registration**: RFC 7591 compliant client registration
-- **Token Encryption**: All tokens encrypted at rest using AES-256-GCM
+- **Token Management**: Secure token storage and automatic refresh
 
-### Token Encryption
-
-Implementation of AES-256-GCM encryption for secure token storage in KV namespaces with unique initialization vectors per operation.
-
-```typescript
-async function encryptTokens(
-  tokens: any,
-  encryptionKey: string,
-): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(encryptionKey.substring(0, 32)),
-    { name: "AES-GCM" },
-    false,
-    ["encrypt"],
-  );
-
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    new TextEncoder().encode(JSON.stringify(tokens)),
-  );
-
-  return base64URLEncode(new Uint8Array([...iv, ...new Uint8Array(encrypted)]));
-}
-```
-
-### HMAC-Signed Approval Cookies
-
-Client approval state is stored in HMAC-signed cookies to prevent tampering and maintain approval across sessions. The signature ensures that approved client lists cannot be modified by users, while the cookie approach avoids database lookups for every authorization request, improving performance.
-
-```typescript
-async function signApprovalCookie(approvedClients, secret) {
-  const payload = JSON.stringify(approvedClients);
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { hash: "SHA-256", name: "HMAC" },
-    false,
-    ["sign"],
-  );
-
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(payload),
-  );
-  const signatureHex = Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  return `${signatureHex}.${btoa(payload)}`;
-}
-```
-
-### Input Sanitization
-
-All user inputs rendered in HTML responses are sanitized to prevent XSS attacks, especially in the OAuth approval dialog. This function escapes HTML special characters, ensuring that malicious scripts cannot be injected through client names or redirect URIs displayed to users.
-
-```typescript
-function sanitizeHtml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-```
-
-### Security Headers
-
-Security-critical cookies are configured with HttpOnly, Secure, and SameSite flags to prevent various attack vectors. These headers ensure cookies cannot be accessed via JavaScript (HttpOnly), are only sent over HTTPS (Secure), and are protected against CSRF attacks (SameSite).
-
-```typescript
-const secureCookie = `${name}=${value}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=${ttl}`;
-```
+The OAuth Provider manages all cryptographic operations including token encryption, signature validation, and secure cookie handling. Additional security features like input sanitization and security headers are handled by the underlying Cloudflare Workers runtime and Hono framework.
 
 ## Technical Innovations
 
@@ -2446,287 +2316,352 @@ Handles OAuth-specific errors like expired tokens, invalid grants, and authoriza
 }
 ```
 
-## Testing Guide
+## Development Guide
 
-### Development Testing
+### Development Environment Setup
 
-Testing procedures for local development environments including tool discovery validation, authentication flow testing, and API integration verification.
+The Microsoft 365 MCP Server development environment provides comprehensive tooling for local development, testing, and deployment validation. The architecture supports hot reloading during development while maintaining production parity.
 
-#### Tool Discovery Test
+#### Local Development Server
 
 ```bash
-curl -X POST https://your-domain.workers.dev/sse \
+# Start development server with hot reload
+npm run dev
+
+# Server starts on http://localhost:8787
+# Durable Objects are simulated locally
+# OAuth flows redirect to localhost for testing
+```
+
+**Development Server Capabilities:**
+- **Hot Module Reloading**: TypeScript changes trigger automatic rebuilds
+- **Local Durable Objects**: Full session persistence simulation
+- **OAuth Flow Testing**: Redirects work with localhost callbacks
+- **Microsoft Graph Mocking**: Can be configured for offline development
+
+#### Development Workflow
+
+**1. Code Changes and Validation**
+```bash
+# Real-time type checking during development
+npm run type-check
+
+# Code quality enforcement
+npm run lint
+
+# Auto-fix common issues
+npm run lint:fix
+
+# Format code consistently  
+npm run format
+
+# Validate formatting
+npm run format:check
+```
+
+**2. Build Process**
+```bash
+# TypeScript compilation only (for CI/validation)
+npm run build:ci
+
+# Full production build with validation
+npm run build
+
+# Clean build artifacts
+npm run clean
+```
+
+### Testing and Validation
+
+#### Protocol Testing
+
+The server implements the Model Context Protocol specification and can be tested at multiple levels:
+
+**Discovery Phase Testing (No Authentication)**
+```bash
+# Test MCP initialization handshake
+curl -X POST http://localhost:8787/sse \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {
+        "name": "test-client",
+        "version": "1.0.0"
+      }
+    }
+  }'
+
+# Expected response includes server capabilities
 ```
 
-#### Authentication Test
-
+**Tool Enumeration Testing**
 ```bash
-curl -X POST https://your-domain.workers.dev/sse \
+# List available tools (no auth required for discovery)
+curl -X POST http://localhost:8787/sse \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sendEmail","arguments":{"to":"test@example.com","subject":"Test","body":"Hello"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  | jq '.result.tools[] | .name'
+
+# Should return: sendEmail, getEmails, searchEmails, getCalendarEvents, 
+# createCalendarEvent, sendTeamsMessage, createTeamsMeeting, getContacts
 ```
 
-### WebSocket Testing
-
-Validation procedures for WebSocket upgrade handling and protocol negotiation, ensuring proper header processing and connection establishment.
-
+**Resource Discovery Testing**
 ```bash
-# Test WebSocket upgrade headers
-curl -X GET https://your-domain.workers.dev/sse \
-       -H "Upgrade: websocket" \
-       -H "Connection: Upgrade" \
-       -H "Sec-WebSocket-Key: test" \
-       -H "Sec-WebSocket-Version: 13" \
-       -v
-```
-
-### Production Testing
-
-Production environment validation including health checks, performance benchmarks, and end-to-end authentication flow verification.
-
-#### Health Check
-
-```bash
-curl -X POST https://your-production-domain.com/sse \
+# List available resources
+curl -X POST http://localhost:8787/sse \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"health-check","version":"1.0.0"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}' \
+  | jq '.result.resources'
 ```
 
-#### End-to-End Tool Test
+#### OAuth Flow Testing
 
+**Manual OAuth Flow Validation**
 ```bash
-# 1. Get OAuth token (replace with your flow)
-TOKEN=$(curl -s -X POST https://your-domain.com/token \
-  -d "grant_type=authorization_code&code=AUTH_CODE&client_id=CLIENT_ID" | \
-  jq -r .access_token)
+# 1. Start authorization flow
+open "http://localhost:8787/authorize?client_id=test&response_type=code&redirect_uri=http://localhost:8787&scope=User.Read"
 
-# 2. Test tool execution
-curl -X POST https://your-domain.com/sse \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"getEmails","arguments":{"count":5}}}'
+# 2. Complete Microsoft authentication in browser
+# 3. Verify callback handling and token exchange
+# 4. Test authenticated endpoint access
 ```
 
-## Protocol Examples
+**Token Exchange Testing**
+```bash
+# Test token endpoint directly (after obtaining auth code)
+curl -X POST http://localhost:8787/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code&code=YOUR_AUTH_CODE&client_id=test&redirect_uri=http://localhost:8787"
+```
 
-### WebSocket Client Example (Node.js)
+#### Microsoft Graph Integration Testing
 
-Demonstrates establishing a WebSocket connection from Node.js for bidirectional real-time communication with the MCP server. WebSockets provide full-duplex communication channels ideal for interactive applications.
-
-```javascript
-const WebSocket = require("ws");
-
-const ws = new WebSocket("wss://your-domain.com/sse", {
-  headers: {
-    Authorization: "Bearer YOUR_OAUTH_TOKEN",
+**Mock Graph API Setup** (for offline development)
+```typescript
+// Add to wrangler development configuration
+// Create mock responses for Graph API endpoints
+const mockGraphResponses = {
+  '/me': {
+    id: 'mock-user-id',
+    displayName: 'Test User',
+    mail: 'test@example.com'
   },
-});
-
-ws.on("open", function open() {
-  // Initialize MCP connection
-  ws.send(
-    JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: {
-          name: "nodejs-client",
-          version: "1.0.0",
-        },
-      },
-    }),
-  );
-});
-
-ws.on("message", function message(data) {
-  const response = JSON.parse(data.toString());
-  console.log("Received:", response);
-
-  if (response.id === 1) {
-    // Server initialized, now call a tool
-    ws.send(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: {
-          name: "getEmails",
-          arguments: { count: 10 },
-        },
-      }),
-    );
+  '/me/messages': {
+    value: [
+      {
+        id: 'mock-message-1',
+        subject: 'Test Email',
+        from: { emailAddress: { address: 'sender@example.com' } }
+      }
+    ]
   }
-});
-```
-
-### Server-Sent Events Example (JavaScript)
-
-Shows browser-based connection using Server-Sent Events for unidirectional server-to-client streaming. SSE provides a simpler alternative to WebSockets for applications primarily receiving server updates.
-
-```javascript
-// For web applications using SSE
-const eventSource = new EventSource(
-  "https://your-domain.com/sse?token=YOUR_TOKEN",
-);
-
-eventSource.onmessage = function (event) {
-  const data = JSON.parse(event.data);
-  console.log("MCP Response:", data);
 };
+```
 
-// Send JSON-RPC requests via fetch
-async function callTool(name, arguments) {
-  const response = await fetch("https://your-domain.com/sse", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Bearer YOUR_TOKEN",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: Date.now(),
-      method: "tools/call",
-      params: { name, arguments },
-    }),
-  });
+**Live Graph API Testing** (requires valid tokens)
+```bash
+# Test Graph API connectivity with real tokens
+curl -X GET https://graph.microsoft.com/v1.0/me \
+  -H "Authorization: Bearer YOUR_MICROSOFT_TOKEN" \
+  | jq .
+```
 
-  return response.json();
-}
+### Debugging and Monitoring
 
-// Usage
-callTool("sendEmail", {
-  to: "recipient@company.com",
-  subject: "API Test",
-  body: "This email was sent via the MCP API",
+#### Local Development Debugging
+
+**Console Logging**
+```typescript
+// Debug MCP protocol messages
+console.log('MCP Request:', JSON.stringify(request, null, 2));
+
+// Debug OAuth flow
+console.log('OAuth Props:', this.props);
+
+// Debug Microsoft Graph responses
+console.log('Graph Response:', response);
+```
+
+**Wrangler Development Tools**
+```bash
+# Tail development logs in real-time
+wrangler tail --format pretty
+
+# Filter logs for specific events
+wrangler tail --format json | jq 'select(.logs[].message | contains("OAuth"))'
+
+# Monitor Durable Object activity
+wrangler tail --format json | grep -i "durable"
+```
+
+#### Production Debugging
+
+**Health Check Endpoints**
+```bash
+# Verify OAuth Provider configuration
+curl https://your-worker.workers.dev/.well-known/openid-configuration \
+  | jq '.issuer, .authorization_endpoint, .token_endpoint'
+
+# Test Durable Object binding
+curl -X POST https://your-worker.workers.dev/sse \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  | jq '.result'
+```
+
+**Deployment Validation**
+```bash
+# Check worker deployment status
+wrangler deployments list
+
+# Verify KV namespaces
+wrangler kv namespace list
+
+# Test OAuth configuration
+wrangler secret list
+```
+
+### Development Best Practices
+
+#### Code Quality Standards
+
+The project follows strict TypeScript and ESLint configurations:
+
+```typescript
+// Type-safe Microsoft Graph client usage
+const client = new MicrosoftGraphClient(env);
+const emails = await client.getEmails(accessToken, {
+  count: 10,
+  folder: 'inbox'
 });
+
+// Proper error handling with context-specific messages
+try {
+  await graphOperation();
+} catch (error) {
+  throw new Error(`Microsoft Graph operation failed: ${error.message}`);
+}
 ```
 
-### Direct HTTP Example (Python)
+#### Performance Considerations
 
-Illustrates standard HTTP request/response interaction with the MCP server from Python. This approach works with any HTTP client library and is ideal for scripting and automation.
-
-```python
-import requests
-import json
-
-BASE_URL = 'https://your-domain.com/sse'
-TOKEN = 'YOUR_OAUTH_TOKEN'
-
-headers = {
-    'Content-Type': 'application/json',
-    'Authorization': f'Bearer {TOKEN}'
-}
-
-# Initialize connection
-init_payload = {
-    'jsonrpc': '2.0',
-    'id': 1,
-    'method': 'initialize',
-    'params': {
-        'protocolVersion': '2024-11-05',
-        'capabilities': {},
-        'clientInfo': {
-            'name': 'python-client',
-            'version': '1.0.0'
-        }
+**Durable Object Efficiency**
+```typescript
+// Minimize Durable Object state reads/writes
+class MicrosoftMCPAgent extends McpAgent {
+  // Cache frequently accessed data in memory
+  private cachedUserProfile?: any;
+  
+  async getUserProfile() {
+    if (!this.cachedUserProfile) {
+      this.cachedUserProfile = await this.fetchUserProfile();
     }
+    return this.cachedUserProfile;
+  }
 }
-
-response = requests.post(BASE_URL, headers=headers, json=init_payload)
-print('Initialize:', response.json())
-
-# List tools
-list_tools = {
-    'jsonrpc': '2.0',
-    'id': 2,
-    'method': 'tools/list',
-    'params': {}
-}
-
-response = requests.post(BASE_URL, headers=headers, json=list_tools)
-print('Tools:', response.json())
-
-# Call a tool
-call_tool = {
-    'jsonrpc': '2.0',
-    'id': 3,
-    'method': 'tools/call',
-    'params': {
-        'name': 'getCalendarEvents',
-        'arguments': {'days': 7}
-    }
-}
-
-response = requests.post(BASE_URL, headers=headers, json=call_tool)
-print('Calendar Events:', response.json())
 ```
 
-### Complete mcp-remote Authentication Flow
+**Microsoft Graph API Optimization**
+```typescript
+// Use selective queries to minimize response size
+const selectFields = 'id,subject,from,receivedDateTime,bodyPreview';
+const url = `${this.baseUrl}/me/messages?$select=${selectFields}&$top=10`;
 
-Step-by-step guide for integrating the mcp-remote CLI tool with full OAuth authentication. This flow handles the complete authentication lifecycle from initial setup through token refresh.
+// Implement request batching for multiple operations
+const batchRequest = {
+  requests: [
+    { id: '1', method: 'GET', url: '/me/messages?$top=5' },
+    { id: '2', method: 'GET', url: '/me/events?$top=5' }
+  ]
+};
+```
 
-For mcp-remote integration with full authentication setup:
+### Development Environment Configuration
 
+#### Environment Variables
+
+**Required Development Variables** (`.dev.vars`)
 ```bash
-# 1. Install mcp-remote
-npm install -g @mcp/remote
+# Microsoft Application Registration
+MICROSOFT_CLIENT_ID=your-app-id
+MICROSOFT_TENANT_ID=your-tenant-id
+MICROSOFT_CLIENT_SECRET=your-client-secret
 
-# 2. Configure connection with authentication
-mcp-remote add m365 wss://your-worker-domain.com/sse
+# Encryption Keys (generate with: openssl rand -hex 32)
+ENCRYPTION_KEY=your-32-character-hex-key
+COOKIE_ENCRYPTION_KEY=your-cookie-encryption-key
+COOKIE_SECRET=your-cookie-secret
 
-# 3. Complete OAuth flow (browser-based authentication)
-mcp-remote auth m365
-# This opens browser to complete OAuth flow with Microsoft 365
-# Returns to command line after successful authentication
-
-# 4. Verify connection
-mcp-remote list m365
-
-# 5. Use tools
-mcp-remote call m365 getEmails '{"count": 10}'
-mcp-remote call m365 sendEmail '{
-  "to": "user@company.com",
-  "subject": "Test from MCP",
-  "body": "This email was sent via mcp-remote"
-}'
-
-# 6. Access resources
-mcp-remote resource m365 microsoft://profile
+# Graph API Configuration
+GRAPH_API_VERSION=v1.0
 ```
 
-### Durable Objects Migration Setup
-
-Configuration for Durable Objects schema migrations ensuring backward compatibility when updating session management logic or state structures.
-
-For production deployments, set up Durable Objects migration:
-
-```javascript
-// wrangler.toml migration configuration
-[[migrations]]
-tag = "v1"
-new_classes = ["MicrosoftMCPAgent"]
-
-[[migrations]]
-tag = "v2"
-new_classes = ["MicrosoftMCPAgent"]
-renamed_classes = [
-  { from = "OldMCPAgent", to = "MicrosoftMCPAgent" }
-]
-```
-
+**Optional Development Variables**
 ```bash
-# Deploy with migration
-wrangler deploy --compatibility-date 2024-01-01 --compatibility-flags=nodejs_compat
+# Development server configuration
+WORKER_DOMAIN=localhost:8787
+PROTOCOL=http
 
-# Verify Durable Objects setup
-wrangler dev --local --persist
+# Debug flags
+DEBUG_OAUTH=true
+DEBUG_GRAPH_API=true
 ```
+
+#### Wrangler Configuration
+
+**Development Configuration** (`wrangler.toml`)
+```toml
+name = "m365-mcp-server-dev"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Local development bindings
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "local-oauth-kv"
+preview_id = "local-oauth-kv"
+
+[[durable_objects.bindings]]
+name = "MCP_OBJECT"
+class_name = "MicrosoftMCPAgent"
+```
+
+### Common Development Issues and Solutions
+
+#### Issue: OAuth Redirect Mismatch
+**Problem**: `redirect_uri_mismatch` errors during development
+**Solution**: 
+1. Add `http://localhost:8787` to Azure app registration redirect URIs
+2. Ensure exact URI match including trailing slashes
+3. Use HTTPS in production, HTTP only for local development
+
+#### Issue: Durable Object Binding Errors
+**Problem**: `Error: Durable Object binding not found`
+**Solution**:
+1. Verify `[[durable_objects.bindings]]` in `wrangler.toml`
+2. Ensure class export matches binding configuration
+3. Clear local storage: `rm -rf .wrangler`
+
+#### Issue: Microsoft Graph Permission Errors
+**Problem**: `403 Forbidden` from Graph API calls
+**Solution**:
+1. Verify required scopes in Azure app registration
+2. Grant admin consent for application permissions
+3. Check token scope with: `jwt.io` decoder
+
+#### Issue: TypeScript Build Errors
+**Problem**: Type checking failures during development
+**Solution**:
+1. Update `@cloudflare/workers-types` to latest version
+2. Clear TypeScript cache: `rm -rf node_modules/.cache`
+3. Restart TypeScript language server in IDE
 
 ## Production Deployment Recommendations
 
