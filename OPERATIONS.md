@@ -300,215 +300,27 @@ npm run deploy        # Validates, then deploys to Cloudflare
 
 ## Testing
 
-The testing infrastructure is currently in its foundational stage. While the project includes Vitest as a dependency and has the necessary TypeScript configuration for comprehensive testing, no test implementations exist yet.
+Testing infrastructure is currently minimal. The project includes Vitest in dependencies but no tests are implemented yet.
 
-### Current Testing Capabilities
-
-The project provides essential quality assurance tools for development:
+### Current Status
 
 ```bash
-# TypeScript type checking - validates all type definitions
+# Type checking (available)
 npm run type-check
 
-# ESLint code analysis - enforces code quality standards
+# Linting (available)
 npm run lint
 
-# Prettier formatting verification
-npm run format:check
-
-# Build validation - ensures production readiness
-npm run build
+# Unit tests (not implemented)
+# npm test
 ```
 
-### Testing Architecture Recommendations
+### Future Testing Implementation
 
-When implementing a comprehensive test suite, the architecture should follow these patterns:
-
-#### Unit Testing Strategy
-
-**Microsoft Graph Client Testing** (`src/microsoft-graph.ts:607 lines`)
-
-```typescript
-// Example test structure for Graph API client
-describe("MicrosoftGraphClient", () => {
-  test("sendEmail should construct proper Graph API request", async () => {
-    const mockFetch = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 204,
-      headers: new Headers({ "content-type": "application/json" }),
-    });
-
-    const client = new MicrosoftGraphClient(mockEnv);
-    await client.sendEmail("mock-token", {
-      to: "test@example.com",
-      subject: "Test Email",
-      body: "Test content",
-    });
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "https://graph.microsoft.com/v1.0/me/sendMail",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          Authorization: "Bearer mock-token",
-          "Content-Type": "application/json",
-        }),
-      }),
-    );
-  });
-});
-```
-
-#### Integration Testing Strategy
-
-**OAuth Flow Testing**
-
-- Mock Microsoft Identity Platform endpoints
-- Validate token exchange callback functionality
-- Test authorization code to access token conversion
-- Verify refresh token handling
-
-**Durable Object Testing**
-
-```typescript
-// Example Durable Object test with Miniflare
-describe("MicrosoftMCPAgent", () => {
-  test("should handle MCP tool/list requests", async () => {
-    const mf = new Miniflare({
-      modules: true,
-      script: workerScript,
-      durableObjects: {
-        MCP_OBJECT: "MicrosoftMCPAgent",
-      },
-    });
-
-    const response = await mf.dispatchFetch("http://localhost/sse", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/list",
-        params: {},
-      }),
-    });
-
-    const result = await response.json();
-    expect(result.result.tools).toHaveLength(8);
-  });
-});
-```
-
-### Manual Testing Procedures
-
-#### Development Environment Validation
-
-**Basic Connectivity Test**
-
-```bash
-# Test discovery endpoint (no auth required)
-curl -X POST http://localhost:8787/sse \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
-  | jq '.result.tools | length'
-```
-
-**OAuth Flow Manual Test**
-
-```bash
-# 1. Start local development server
-npm run dev
-
-# 2. Open OAuth authorization URL in browser
-open "http://localhost:8787/authorize?client_id=test&response_type=code&redirect_uri=http://localhost:8787/callback"
-
-# 3. Complete Microsoft authentication flow
-# 4. Verify successful token exchange and session creation
-```
-
-#### Production Environment Validation
-
-**Health Check Sequence**
-
-```bash
-# 1. Verify worker deployment
-curl -I https://your-worker.workers.dev/
-
-# 2. Test OAuth provider endpoints
-curl https://your-worker.workers.dev/.well-known/openid-configuration | jq .
-
-# 3. Validate Durable Objects binding
-wrangler tail --format json | grep -i "durable"
-
-# 4. Test discovery phase
-curl -X POST https://your-worker.workers.dev/sse \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{}}}' \
-  | jq .
-```
-
-### Testing Environment Setup
-
-#### Mock Services Configuration
-
-**Microsoft Graph API Mocking**
-
-```typescript
-// Setup MSW (Mock Service Worker) for Graph API responses
-const graphHandlers = [
-  rest.post("https://graph.microsoft.com/v1.0/me/sendMail", (req, res, ctx) => {
-    return res(ctx.status(204));
-  }),
-
-  rest.get("https://graph.microsoft.com/v1.0/me/messages", (req, res, ctx) => {
-    return res(
-      ctx.json({
-        value: [
-          {
-            id: "mock-email-1",
-            subject: "Test Email",
-            from: { emailAddress: { address: "test@example.com" } },
-          },
-        ],
-      }),
-    );
-  }),
-];
-```
-
-#### Test Data Management
-
-**OAuth Token Fixtures**
-
-```typescript
-// Mock OAuth tokens for testing
-const mockOAuthTokens = {
-  accessToken: "mock.access.token",
-  refreshToken: "mock.refresh.token",
-  expiresIn: 3600,
-  tokenType: "Bearer",
-};
-```
-
-### Testing Gaps and Priorities
-
-**High Priority**
-
-1. Unit tests for all Microsoft Graph client methods
-2. OAuth flow integration tests
-3. Durable Object state management tests
-
-**Medium Priority**
-
-1. End-to-end MCP protocol compliance tests
-2. Error handling validation tests
-3. Rate limiting behavior tests
-
-**Low Priority**
-
-1. Performance benchmarking tests
-2. Multi-user concurrent access tests
-3. Token refresh edge case tests
+When implementing tests, consider:
+- Unit tests for Microsoft Graph client methods
+- Integration tests for OAuth flow
+- Mock Microsoft Graph API responses for consistent testing
 
 ## Adding New Features
 

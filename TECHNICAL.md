@@ -125,7 +125,7 @@ WebSocket support is provided by the MCP SDK's built-in WebSocket handling capab
 
 ### OAuth Flow Architecture
 
-The complete OAuth 2.1 implementation spans five distinct flows that handle everything from unauthenticated discovery to automatic token refresh. Each flow is designed to minimize round trips while maintaining security through state validation, HMAC-signed cookies, and encrypted token storage.
+The complete OAuth 2.1 implementation spans five distinct flows that handle everything from unauthenticated discovery to automatic token refresh. Each flow is designed to minimize round trips while maintaining security through OAuth Provider's built-in state validation, secure cookie handling, and encrypted token storage.
 
 ```mermaid
 flowchart TB
@@ -547,14 +547,8 @@ await env.OAUTH_KV.put(
   }),
 );
 
-// Encrypted access tokens
-const encryptedTokens = await encryptTokens(
-  microsoftTokens,
-  env.ENCRYPTION_KEY,
-);
-await env.OAUTH_KV.put(`tokens:${userId}`, encryptedTokens, {
-  expirationTtl: 3600,
-});
+// Token storage handled by OAuth Provider
+// Secure token management provided by Cloudflare Workers OAuth Provider
 ```
 
 **CONFIG_KV Namespace - Static Configuration:**
@@ -579,23 +573,9 @@ await env.CONFIG_KV.put(
 );
 ```
 
-**CACHE_KV Namespace - Response Caching:**
+**CACHE_KV Namespace - Future Enhancement:**
 
-Temporary storage for Microsoft Graph API responses to reduce API calls and improve response times. Cached data includes a 5-minute TTL by default and is keyed by user ID and request parameters to ensure data isolation.
-
-```typescript
-// Cache Microsoft Graph responses
-const cacheKey = `emails-${userId}-${folder}-${timestamp}`;
-const cacheData = {
-  data: emails,
-  timestamp: Date.now(),
-  userId: userId,
-};
-
-await env.CACHE_KV.put(cacheKey, JSON.stringify(cacheData), {
-  expirationTtl: 300, // 5 minutes
-});
-```
+While CACHE_KV is declared in the environment interface, application-level caching is not currently implemented. Response optimization relies on Cloudflare's edge caching and Microsoft Graph API's built-in caching mechanisms.
 
 ### Session Isolation
 
@@ -1070,39 +1050,9 @@ Handling of complex token scenarios including race conditions, expired refresh t
    - Sync server time via NTP if issues persist
    - Add 30-second buffer to token expiration checks
 
-### Token Storage and Encryption
+### Token Management
 
-All tokens are encrypted using AES-256-GCM before storage in KV namespaces, with unique initialization vectors for each encryption operation. The encryption key is stored as a Cloudflare secret, separate from the encrypted data, providing defense in depth against token theft even if KV storage is compromised.
-
-```typescript
-// Encrypt tokens before storage
-async function encryptTokens(
-  tokens: any,
-  encryptionKey: string,
-): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(encryptionKey.substring(0, 32)),
-    { name: "AES-GCM" },
-    false,
-    ["encrypt"],
-  );
-
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    new TextEncoder().encode(JSON.stringify(tokens)),
-  );
-
-  return base64URLEncode(new Uint8Array([...iv, ...new Uint8Array(encrypted)]));
-}
-
-// Store with automatic expiration
-await env.OAUTH_KV.put(`tokens:${userId}`, encryptedTokens, {
-  expirationTtl: microsoftTokens.expires_in,
-});
-```
+Token storage and encryption are handled by the Cloudflare Workers OAuth Provider, which manages secure token persistence and automatic expiration. The OAuth Provider uses industry-standard security practices for token protection without requiring custom encryption implementations.
 
 ## Rate Limiting & Performance
 
@@ -1454,10 +1404,10 @@ Analysis of external dependencies versus custom implementations, balancing code 
 
 ### Implementation Distribution
 
-Breakdown of functionality between third-party libraries and custom code, showing the significant custom implementation required for platform adaptation.
+Breakdown of functionality between third-party libraries and custom code, showing the substantial custom implementation required for platform and protocol integration.
 
-- **Library-Provided (40%)**: OAuth protocol, WebSocket handling, type definitions, request routing
-- **Manual Implementation (60%)**: Microsoft Graph integration, client detection, protocol adaptation, session management, security patterns
+- **Library-Provided (25%)**: OAuth protocol foundation, MCP protocol foundation, HTTP routing, validation schemas
+- **Custom Implementation (75%)**: Microsoft Graph API client, OAuth-MCP integration, client detection, protocol adaptation, session management, tool implementations, authentication flows
 
 ### Key Manual Implementations
 
@@ -1497,28 +1447,16 @@ Target performance benchmarks for production deployments based on Cloudflare Wor
 
 Techniques for improving response times and reducing API calls including intelligent caching, request batching, and connection pooling.
 
-**Response Caching:**
+**Edge Computing Benefits:**
 
-```typescript
-// Cache frequently accessed data
-const cacheKey = `emails-${userId}-${folder}`;
-const cached = await env.CACHE_KV.get(cacheKey);
-if (cached) {
-  return JSON.parse(cached);
-}
+Response optimization relies on Cloudflare's global edge network:
 
-// Fetch fresh data and cache
-const data = await fetchFromGraphAPI();
-await env.CACHE_KV.put(cacheKey, JSON.stringify(data), {
-  expirationTtl: 300, // 5 minutes
-});
-```
+- **Global Distribution**: 330+ edge locations worldwide  
+- **HTTP/2 Multiplexing**: Efficient connection reuse for Microsoft Graph API calls
+- **Built-in Caching**: Cloudflare automatically optimizes static assets and API responses
+- **Concurrent Sessions**: Unlimited scaling via Durable Objects architecture
 
-**Edge Computing:**
-
-- **Global Distribution**: 330+ edge locations worldwide
-- **Response Time**: < 200ms for cached Graph API responses
-- **Concurrent Sessions**: Unlimited via Durable Objects architecture
+No application-level caching is currently implemented.
 
 ## Protocol Overview
 
@@ -3097,16 +3035,7 @@ const CalendarEventSchema = z.object({
   message: 'End time must be after start time'
 });
 
-// HTML sanitization for email bodies
-import DOMPurify from 'isomorphic-dompurify';
-
-export function sanitizeHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3'],
-    ALLOWED_ATTR: ['href', 'target'],
-    ALLOW_DATA_ATTR: false
-  });
-}
+// Input sanitization is handled by the underlying Hono framework and Cloudflare Workers runtime
 
 // Validation middleware
 export async function validateInput<T>(
@@ -3128,9 +3057,7 @@ async sendEmail(token: string, params: unknown): Promise<any> {
   // Validate and sanitize input
   const validated = await validateInput(EmailParamsSchema, params);
 
-  if (validated.contentType === 'html') {
-    validated.body = sanitizeHtml(validated.body);
-  }
+  // Content validation handled by Zod schema and Microsoft Graph API
 
   // Proceed with validated data
   return this.graphApiCall(token, validated);
