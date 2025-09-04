@@ -327,32 +327,33 @@ When implementing a comprehensive test suite, the architecture should follow the
 #### Unit Testing Strategy
 
 **Microsoft Graph Client Testing** (`src/microsoft-graph.ts:607 lines`)
+
 ```typescript
 // Example test structure for Graph API client
-describe('MicrosoftGraphClient', () => {
-  test('sendEmail should construct proper Graph API request', async () => {
+describe("MicrosoftGraphClient", () => {
+  test("sendEmail should construct proper Graph API request", async () => {
     const mockFetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 204,
-      headers: new Headers({ 'content-type': 'application/json' })
+      headers: new Headers({ "content-type": "application/json" }),
     });
-    
+
     const client = new MicrosoftGraphClient(mockEnv);
-    await client.sendEmail('mock-token', {
-      to: 'test@example.com',
-      subject: 'Test Email',
-      body: 'Test content'
+    await client.sendEmail("mock-token", {
+      to: "test@example.com",
+      subject: "Test Email",
+      body: "Test content",
     });
-    
+
     expect(mockFetch).toHaveBeenCalledWith(
-      'https://graph.microsoft.com/v1.0/me/sendMail',
+      "https://graph.microsoft.com/v1.0/me/sendMail",
       expect.objectContaining({
-        method: 'POST',
+        method: "POST",
         headers: expect.objectContaining({
-          'Authorization': 'Bearer mock-token',
-          'Content-Type': 'application/json'
-        })
-      })
+          Authorization: "Bearer mock-token",
+          "Content-Type": "application/json",
+        }),
+      }),
     );
   });
 });
@@ -361,35 +362,37 @@ describe('MicrosoftGraphClient', () => {
 #### Integration Testing Strategy
 
 **OAuth Flow Testing**
+
 - Mock Microsoft Identity Platform endpoints
 - Validate token exchange callback functionality
 - Test authorization code to access token conversion
 - Verify refresh token handling
 
 **Durable Object Testing**
+
 ```typescript
 // Example Durable Object test with Miniflare
-describe('MicrosoftMCPAgent', () => {
-  test('should handle MCP tool/list requests', async () => {
+describe("MicrosoftMCPAgent", () => {
+  test("should handle MCP tool/list requests", async () => {
     const mf = new Miniflare({
       modules: true,
       script: workerScript,
       durableObjects: {
-        MCP_OBJECT: 'MicrosoftMCPAgent'
-      }
+        MCP_OBJECT: "MicrosoftMCPAgent",
+      },
     });
-    
-    const response = await mf.dispatchFetch('http://localhost/sse', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+
+    const response = await mf.dispatchFetch("http://localhost/sse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        jsonrpc: '2.0',
+        jsonrpc: "2.0",
         id: 1,
-        method: 'tools/list',
-        params: {}
-      })
+        method: "tools/list",
+        params: {},
+      }),
     });
-    
+
     const result = await response.json();
     expect(result.result.tools).toHaveLength(8);
   });
@@ -401,6 +404,7 @@ describe('MicrosoftMCPAgent', () => {
 #### Development Environment Validation
 
 **Basic Connectivity Test**
+
 ```bash
 # Test discovery endpoint (no auth required)
 curl -X POST http://localhost:8787/sse \
@@ -410,6 +414,7 @@ curl -X POST http://localhost:8787/sse \
 ```
 
 **OAuth Flow Manual Test**
+
 ```bash
 # 1. Start local development server
 npm run dev
@@ -424,6 +429,7 @@ open "http://localhost:8787/authorize?client_id=test&response_type=code&redirect
 #### Production Environment Validation
 
 **Health Check Sequence**
+
 ```bash
 # 1. Verify worker deployment
 curl -I https://your-worker.workers.dev/
@@ -446,53 +452,60 @@ curl -X POST https://your-worker.workers.dev/sse \
 #### Mock Services Configuration
 
 **Microsoft Graph API Mocking**
+
 ```typescript
 // Setup MSW (Mock Service Worker) for Graph API responses
 const graphHandlers = [
-  rest.post('https://graph.microsoft.com/v1.0/me/sendMail', (req, res, ctx) => {
+  rest.post("https://graph.microsoft.com/v1.0/me/sendMail", (req, res, ctx) => {
     return res(ctx.status(204));
   }),
-  
-  rest.get('https://graph.microsoft.com/v1.0/me/messages', (req, res, ctx) => {
-    return res(ctx.json({
-      value: [
-        {
-          id: 'mock-email-1',
-          subject: 'Test Email',
-          from: { emailAddress: { address: 'test@example.com' } }
-        }
-      ]
-    }));
-  })
+
+  rest.get("https://graph.microsoft.com/v1.0/me/messages", (req, res, ctx) => {
+    return res(
+      ctx.json({
+        value: [
+          {
+            id: "mock-email-1",
+            subject: "Test Email",
+            from: { emailAddress: { address: "test@example.com" } },
+          },
+        ],
+      }),
+    );
+  }),
 ];
 ```
 
 #### Test Data Management
 
 **OAuth Token Fixtures**
+
 ```typescript
 // Mock OAuth tokens for testing
 const mockOAuthTokens = {
-  accessToken: 'mock.access.token',
-  refreshToken: 'mock.refresh.token',
+  accessToken: "mock.access.token",
+  refreshToken: "mock.refresh.token",
   expiresIn: 3600,
-  tokenType: 'Bearer'
+  tokenType: "Bearer",
 };
 ```
 
 ### Testing Gaps and Priorities
 
 **High Priority**
+
 1. Unit tests for all Microsoft Graph client methods
 2. OAuth flow integration tests
 3. Durable Object state management tests
 
 **Medium Priority**
+
 1. End-to-end MCP protocol compliance tests
 2. Error handling validation tests
 3. Rate limiting behavior tests
 
 **Low Priority**
+
 1. Performance benchmarking tests
 2. Multi-user concurrent access tests
 3. Token refresh edge case tests

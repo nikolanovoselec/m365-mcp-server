@@ -1329,7 +1329,7 @@ const scopes = scopeConfigurations[scope] || scopeConfigurations.full;
 Security is provided by the Cloudflare Workers OAuth Provider which handles:
 
 - **OAuth 2.1 + PKCE**: Standards-compliant authorization code flow with PKCE
-- **State Parameter Validation**: Built-in state management for CSRF protection  
+- **State Parameter Validation**: Built-in state management for CSRF protection
 - **Dynamic Client Registration**: RFC 7591 compliant client registration
 - **Token Management**: Secure token storage and automatic refresh
 
@@ -2334,6 +2334,7 @@ npm run dev
 ```
 
 **Development Server Capabilities:**
+
 - **Hot Module Reloading**: TypeScript changes trigger automatic rebuilds
 - **Local Durable Objects**: Full session persistence simulation
 - **OAuth Flow Testing**: Redirects work with localhost callbacks
@@ -2342,6 +2343,7 @@ npm run dev
 #### Development Workflow
 
 **1. Code Changes and Validation**
+
 ```bash
 # Real-time type checking during development
 npm run type-check
@@ -2352,7 +2354,7 @@ npm run lint
 # Auto-fix common issues
 npm run lint:fix
 
-# Format code consistently  
+# Format code consistently
 npm run format
 
 # Validate formatting
@@ -2360,6 +2362,7 @@ npm run format:check
 ```
 
 **2. Build Process**
+
 ```bash
 # TypeScript compilation only (for CI/validation)
 npm run build:ci
@@ -2378,6 +2381,7 @@ npm run clean
 The server implements the Model Context Protocol specification and can be tested at multiple levels:
 
 **Discovery Phase Testing (No Authentication)**
+
 ```bash
 # Test MCP initialization handshake
 curl -X POST http://localhost:8787/sse \
@@ -2400,6 +2404,7 @@ curl -X POST http://localhost:8787/sse \
 ```
 
 **Tool Enumeration Testing**
+
 ```bash
 # List available tools (no auth required for discovery)
 curl -X POST http://localhost:8787/sse \
@@ -2407,11 +2412,12 @@ curl -X POST http://localhost:8787/sse \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
   | jq '.result.tools[] | .name'
 
-# Should return: sendEmail, getEmails, searchEmails, getCalendarEvents, 
+# Should return: sendEmail, getEmails, searchEmails, getCalendarEvents,
 # createCalendarEvent, sendTeamsMessage, createTeamsMeeting, getContacts
 ```
 
 **Resource Discovery Testing**
+
 ```bash
 # List available resources
 curl -X POST http://localhost:8787/sse \
@@ -2423,6 +2429,7 @@ curl -X POST http://localhost:8787/sse \
 #### OAuth Flow Testing
 
 **Manual OAuth Flow Validation**
+
 ```bash
 # 1. Start authorization flow
 open "http://localhost:8787/authorize?client_id=test&response_type=code&redirect_uri=http://localhost:8787&scope=User.Read"
@@ -2433,6 +2440,7 @@ open "http://localhost:8787/authorize?client_id=test&response_type=code&redirect
 ```
 
 **Token Exchange Testing**
+
 ```bash
 # Test token endpoint directly (after obtaining auth code)
 curl -X POST http://localhost:8787/token \
@@ -2443,28 +2451,30 @@ curl -X POST http://localhost:8787/token \
 #### Microsoft Graph Integration Testing
 
 **Mock Graph API Setup** (for offline development)
+
 ```typescript
 // Add to wrangler development configuration
 // Create mock responses for Graph API endpoints
 const mockGraphResponses = {
-  '/me': {
-    id: 'mock-user-id',
-    displayName: 'Test User',
-    mail: 'test@example.com'
+  "/me": {
+    id: "mock-user-id",
+    displayName: "Test User",
+    mail: "test@example.com",
   },
-  '/me/messages': {
+  "/me/messages": {
     value: [
       {
-        id: 'mock-message-1',
-        subject: 'Test Email',
-        from: { emailAddress: { address: 'sender@example.com' } }
-      }
-    ]
-  }
+        id: "mock-message-1",
+        subject: "Test Email",
+        from: { emailAddress: { address: "sender@example.com" } },
+      },
+    ],
+  },
 };
 ```
 
 **Live Graph API Testing** (requires valid tokens)
+
 ```bash
 # Test Graph API connectivity with real tokens
 curl -X GET https://graph.microsoft.com/v1.0/me \
@@ -2477,18 +2487,20 @@ curl -X GET https://graph.microsoft.com/v1.0/me \
 #### Local Development Debugging
 
 **Console Logging**
+
 ```typescript
 // Debug MCP protocol messages
-console.log('MCP Request:', JSON.stringify(request, null, 2));
+console.log("MCP Request:", JSON.stringify(request, null, 2));
 
 // Debug OAuth flow
-console.log('OAuth Props:', this.props);
+console.log("OAuth Props:", this.props);
 
 // Debug Microsoft Graph responses
-console.log('Graph Response:', response);
+console.log("Graph Response:", response);
 ```
 
 **Wrangler Development Tools**
+
 ```bash
 # Tail development logs in real-time
 wrangler tail --format pretty
@@ -2503,6 +2515,7 @@ wrangler tail --format json | grep -i "durable"
 #### Production Debugging
 
 **Health Check Endpoints**
+
 ```bash
 # Verify OAuth Provider configuration
 curl https://your-worker.workers.dev/.well-known/openid-configuration \
@@ -2516,6 +2529,7 @@ curl -X POST https://your-worker.workers.dev/sse \
 ```
 
 **Deployment Validation**
+
 ```bash
 # Check worker deployment status
 wrangler deployments list
@@ -2538,7 +2552,7 @@ The project follows strict TypeScript and ESLint configurations:
 const client = new MicrosoftGraphClient(env);
 const emails = await client.getEmails(accessToken, {
   count: 10,
-  folder: 'inbox'
+  folder: "inbox",
 });
 
 // Proper error handling with context-specific messages
@@ -2552,12 +2566,13 @@ try {
 #### Performance Considerations
 
 **Durable Object Efficiency**
+
 ```typescript
 // Minimize Durable Object state reads/writes
 class MicrosoftMCPAgent extends McpAgent {
   // Cache frequently accessed data in memory
   private cachedUserProfile?: any;
-  
+
   async getUserProfile() {
     if (!this.cachedUserProfile) {
       this.cachedUserProfile = await this.fetchUserProfile();
@@ -2568,17 +2583,18 @@ class MicrosoftMCPAgent extends McpAgent {
 ```
 
 **Microsoft Graph API Optimization**
+
 ```typescript
 // Use selective queries to minimize response size
-const selectFields = 'id,subject,from,receivedDateTime,bodyPreview';
+const selectFields = "id,subject,from,receivedDateTime,bodyPreview";
 const url = `${this.baseUrl}/me/messages?$select=${selectFields}&$top=10`;
 
 // Implement request batching for multiple operations
 const batchRequest = {
   requests: [
-    { id: '1', method: 'GET', url: '/me/messages?$top=5' },
-    { id: '2', method: 'GET', url: '/me/events?$top=5' }
-  ]
+    { id: "1", method: "GET", url: "/me/messages?$top=5" },
+    { id: "2", method: "GET", url: "/me/events?$top=5" },
+  ],
 };
 ```
 
@@ -2587,6 +2603,7 @@ const batchRequest = {
 #### Environment Variables
 
 **Required Development Variables** (`.dev.vars`)
+
 ```bash
 # Microsoft Application Registration
 MICROSOFT_CLIENT_ID=your-app-id
@@ -2603,6 +2620,7 @@ GRAPH_API_VERSION=v1.0
 ```
 
 **Optional Development Variables**
+
 ```bash
 # Development server configuration
 WORKER_DOMAIN=localhost:8787
@@ -2616,6 +2634,7 @@ DEBUG_GRAPH_API=true
 #### Wrangler Configuration
 
 **Development Configuration** (`wrangler.toml`)
+
 ```toml
 name = "m365-mcp-server-dev"
 main = "src/index.ts"
@@ -2636,29 +2655,37 @@ class_name = "MicrosoftMCPAgent"
 ### Common Development Issues and Solutions
 
 #### Issue: OAuth Redirect Mismatch
+
 **Problem**: `redirect_uri_mismatch` errors during development
-**Solution**: 
+**Solution**:
+
 1. Add `http://localhost:8787` to Azure app registration redirect URIs
 2. Ensure exact URI match including trailing slashes
 3. Use HTTPS in production, HTTP only for local development
 
 #### Issue: Durable Object Binding Errors
+
 **Problem**: `Error: Durable Object binding not found`
 **Solution**:
+
 1. Verify `[[durable_objects.bindings]]` in `wrangler.toml`
 2. Ensure class export matches binding configuration
 3. Clear local storage: `rm -rf .wrangler`
 
 #### Issue: Microsoft Graph Permission Errors
+
 **Problem**: `403 Forbidden` from Graph API calls
 **Solution**:
+
 1. Verify required scopes in Azure app registration
 2. Grant admin consent for application permissions
 3. Check token scope with: `jwt.io` decoder
 
 #### Issue: TypeScript Build Errors
+
 **Problem**: Type checking failures during development
 **Solution**:
+
 1. Update `@cloudflare/workers-types` to latest version
 2. Clear TypeScript cache: `rm -rf node_modules/.cache`
 3. Restart TypeScript language server in IDE
