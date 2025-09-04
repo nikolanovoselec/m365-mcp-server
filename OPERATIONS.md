@@ -318,6 +318,7 @@ npm run lint
 ### Future Testing Implementation
 
 When implementing tests, consider:
+
 - Unit tests for Microsoft Graph client methods
 - Integration tests for OAuth flow
 - Mock Microsoft Graph API responses for consistent testing

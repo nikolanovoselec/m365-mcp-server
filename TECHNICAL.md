@@ -1451,7 +1451,7 @@ Techniques for improving response times and reducing API calls including intelli
 
 Response optimization relies on Cloudflare's global edge network:
 
-- **Global Distribution**: 330+ edge locations worldwide  
+- **Global Distribution**: 330+ edge locations worldwide
 - **HTTP/2 Multiplexing**: Efficient connection reuse for Microsoft Graph API calls
 - **Built-in Caching**: Cloudflare automatically optimizes static assets and API responses
 - **Concurrent Sessions**: Unlimited scaling via Durable Objects architecture

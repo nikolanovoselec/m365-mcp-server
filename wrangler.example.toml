@@ -10,9 +10,9 @@ compatibility_flags = ["nodejs_compat"]
 account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
 
 # Custom domain routing (optional)
-# routes = [
-#   { pattern = "your-domain.com/*", zone_name = "your-domain.com" }
-# ]
+routes = [
+  { pattern = "your-worker-domain.com", custom_domain = true }
+]
 
 # Environment Variables
 [vars]
@@ -24,11 +24,10 @@ GRAPH_API_VERSION = "v1.0"
 WORKER_DOMAIN = "your-worker-name.your-subdomain.workers.dev"
 PROTOCOL = "https"
 
-# Durable Objects
-[durable_objects]
-bindings = [
-  { name = "MICROSOFT_MCP_AGENT", class_name = "MicrosoftMCPAgent" }
-]
+# Durable Objects for session and token management
+[[durable_objects.bindings]]
+name = "MCP_OBJECT"
+class_name = "MicrosoftMCPAgent"
 
 # KV Namespaces
 [[kv_namespaces]]
