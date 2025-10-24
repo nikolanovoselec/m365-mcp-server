@@ -36,11 +36,11 @@ The Microsoft 365 MCP Server implements a sophisticated multi-protocol architect
 graph TB
     Client[MCP Client] --> Entry[Worker Entry Point]
     Entry --> APIToken[API Token Detection]
-    APIToken -->|Discovery Mode| DO1[Discovery DO]
+    APIToken -->|Discovery Mode| DO1[Discovery Durable Object]
     APIToken -->|OAuth Mode| OAuth[OAuth Provider]
 
     OAuth --> SSE["SSE Endpoint (/sse)"]
-    SSE --> DO2[Authenticated DO]
+    SSE --> DO2[Authenticated Durable Object]
 
     DO1 --> Graph[Microsoft Graph]
     DO2 --> Graph
