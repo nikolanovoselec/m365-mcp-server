@@ -1,5 +1,8 @@
 # Remote MCP Server built on Cloudflare Workers with Microsoft 365 Integration
 
+> ⚠️ **Disclaimer:** This repository is an initial, functional implementation of a remote MCP server using OAuth 2.1 + PKCE on Cloudflare Workers with Microsoft 365 Graph API integration. It intentionally mirrors the posture of early AI experiments and is *not* hardened for production use.  
+> For a secured, enterprise-ready deployment with Cloudflare Access, AI Gateway, secret management, and operational guardrails, refer to [m365-mcp-server-production](https://github.com/nikolanovoselec/m365-mcp-server-production).
+
 A robust Model Context Protocol (MCP) server providing secure remote access to Microsoft 365 services through OAuth 2.1 + PKCE authentication. Features industry-standard security, global edge deployment, and native integration support for MCP-compatible AI applications.
 
 ## Why did I build this?
